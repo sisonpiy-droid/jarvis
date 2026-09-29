@@ -8,5 +8,9 @@
     "./login": "./src/login.ts",
     "./file-session": "./src/file-session.ts"
   },
-  "dependencies": { "@jarvis/shared": "*" }
+  "dependencies": {
+    "@jarvis/shared": "*",
+    "zod": "^4.6.5",
+    "playwright-core": "^1.63.0"
+  }
 }

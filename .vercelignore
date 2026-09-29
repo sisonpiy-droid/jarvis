@@ -1,0 +1,12 @@
+# Never upload secrets or personal data
+.env
+.env.*
+!.env.example
+.secrets/
+data/
+# Build artefacts / local state
+node_modules/
+apps/web/.next/
+supabase/functions/*/index.js
+supabase/.temp/
+.git/
