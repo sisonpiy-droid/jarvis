@@ -10,8 +10,10 @@ import {
   type MesaAssignment,
   type MesaSnapshot,
 } from "@jarvis/mesa";
+import { fetchPendingFiles, type BlobStorage, type FetchResult } from "@jarvis/files";
 import { planMessages, type Channel } from "@jarvis/notify";
 import type { Logger } from "@jarvis/shared";
+import { morningBrief } from "./brief";
 import { dbSessionStore } from "./db-session";
 import { diffItems, type Diff, type Keyed } from "./diff";
 import {
@@ -37,6 +39,8 @@ export interface SyncDeps {
   sql: Sql;
   sessionKey: string;
   channel: Channel | null;
+  /** When set, each run also downloads a few pending LMS files into Storage. */
+  storage?: BlobStorage | null;
   log: Logger;
   fetch?: typeof fetch;
   now?: () => Date;
@@ -60,6 +64,7 @@ export interface SyncSummary {
   changes?: Record<string, { created: number; changed: number; removed: number }>;
   queued?: number;
   sent?: number;
+  files?: FetchResult;
   error?: string;
 }
 
@@ -159,9 +164,23 @@ export async function runMesaSync(deps: SyncDeps, opts: SyncOptions): Promise<Sy
       warnings: snap.meta.warnings,
     });
 
+    // Once a day, after 08:00 IST: the morning brief (deduped by date, built from fresh data).
+    const brief = await morningBrief(sql, now).catch((err) => (log.warn("brief failed", { error: err }), null));
+    if (brief) await db.enqueueNotifications(sql, [brief]);
+
     const sent = opts.send !== false && deps.channel ? await dispatchNotifications(sql, deps.channel, log) : 0;
-    log.info("sync finished", { kind, status, requests: snap.meta.requestCount, queued: newNotifications, sent });
-    return { status, kind, runId, requestCount: snap.meta.requestCount, counts: snap.meta.counts, changes: cs.stats, queued: newNotifications, sent };
+
+    // Files last: alerts are never delayed by downloads, and a download problem never fails the sync.
+    let files: FetchResult | undefined;
+    if (deps.storage) {
+      try {
+        files = await fetchPendingFiles({ sql, client, storage: deps.storage, signedUrls: snap.transient?.signedUrls ?? {}, log, ...(deps.fetch ? { fetch: deps.fetch } : {}) });
+      } catch (err) {
+        log.warn("file fetch failed", { error: err });
+      }
+    }
+    log.info("sync finished", { kind, status, requests: client.requestCount, queued: newNotifications, sent, files });
+    return { status, kind, runId, requestCount: client.requestCount, counts: snap.meta.counts, changes: cs.stats, queued: newNotifications, sent, ...(files ? { files } : {}) };
   } finally {
     await db.releaseLock(sql, LOCK, holder).catch(() => {});
   }

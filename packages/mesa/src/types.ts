@@ -159,6 +159,8 @@ export interface MesaSnapshot {
     unavailable: string[];
   };
   student: MesaStudent | null;
+  /** Run-scoped data that must never be stored or written to disk (signed download URLs). */
+  transient?: { signedUrls: Record<string, string> };
   courses: MesaCourse[];
   materials: MesaMaterial[];
   recordings: MesaRecording[];

@@ -1,5 +1,6 @@
 import { connect, getIntegration } from "@jarvis/db";
 import { fileSessionStore } from "@jarvis/mesa/file-session";
+import { SupabaseStorage } from "@jarvis/files";
 import { TelegramChannel } from "@jarvis/notify";
 import { createLogger, intEnv, loadEnv } from "@jarvis/shared";
 import { dbSessionStore, runMesaSync } from "@jarvis/sync";
@@ -32,6 +33,7 @@ try {
       sql,
       sessionKey: key,
       channel: token && chat ? new TelegramChannel(token, chat) : null,
+      storage: process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY ? new SupabaseStorage(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY) : null,
       log,
       maxConcurrency: intEnv("MESA_MAX_CONCURRENCY", 3),
       minGapMs: intEnv("MESA_MIN_GAP_MS", 150),

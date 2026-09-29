@@ -1,2 +1,14 @@
-{ "name": "@jarvis/sync", "version": "0.1.0", "private": true, "type": "module", "exports": "./src/index.ts",
-  "dependencies": { "@jarvis/db": "*", "@jarvis/mesa": "*", "@jarvis/notify": "*", "@jarvis/shared": "*" } }
+{
+  "name": "@jarvis/sync",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@jarvis/db": "*",
+    "@jarvis/mesa": "*",
+    "@jarvis/notify": "*",
+    "@jarvis/shared": "*",
+    "@jarvis/files": "*"
+  }
+}

@@ -12,6 +12,7 @@ import {
   normalizeRecording,
   normalizeStudent,
 } from "./normalize";
+import { isSignedUrl } from "./text";
 import type { CollectionName, MesaMaterial, MesaRecording, MesaSnapshot, MesaWarning } from "./types";
 
 // Topic types whose content lives under /materials vs /recordings. The rest
@@ -37,6 +38,12 @@ class Run {
   warnings: MesaWarning[] = [];
   unavailable: string[] = [];
   incomplete = new Set<CollectionName>();
+  /** Time-limited download URLs seen this run, keyed "<kind>:<itemId>:<attachmentId>". Never persisted. */
+  signedUrls = new Map<string, string>();
+
+  keepSigned(kind: string, itemId: string, atts: Array<{ id: string; url?: string | null | undefined }>) {
+    for (const a of atts) if (a.url && isSignedUrl(a.url)) this.signedUrls.set(`${kind}:${itemId}:${a.id}`, a.url);
+  }
 
   constructor(readonly client: MesaClient) {}
 
@@ -80,14 +87,18 @@ class Run {
 async function fetchAssignments(run: Run, instructorByCourse: Map<string, string | null>) {
   return run.soft("assignments/my", "assignments", async () => {
     const r = await run.client.get<Data>("/assignments/my");
-    return run.validateEach(S.Assignment, r.data?.assignments, "assignments", "assignments").map((a) => normalizeAssignment(a, instructorByCourse));
+    const raw = run.validateEach(S.Assignment, r.data?.assignments, "assignments", "assignments");
+    for (const a of raw) run.keepSigned("assignment", a.id, a.materials);
+    return raw.map((a) => normalizeAssignment(a, instructorByCourse));
   }, []);
 }
 
 async function fetchEvents(run: Run, from: string, to: string) {
   return run.soft("events/my", "events", async () => {
     const r = await run.client.get<Data>(`/events/my?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
-    return run.validateEach(S.Event, r.data?.events, "events", "events").map(normalizeEvent);
+    const raw = run.validateEach(S.Event, r.data?.events, "events", "events");
+    for (const e of raw) run.keepSigned("event", e.id, e.attachments);
+    return raw.map(normalizeEvent);
   }, []);
 }
 
@@ -96,7 +107,9 @@ async function fetchAnnouncements(run: Run, pages: number) {
   for (let page = 1; page <= pages; page++) {
     const batch = await run.soft(`announcements?page=${page}`, "announcements", async () => {
       const r = await run.client.get<Data>(`/announcements?page=${page}&limit=50`);
-      return run.validateEach(S.Announcement, r.data?.announcements, `announcements(p${page})`, "announcements").map(normalizeAnnouncement);
+      const raw = run.validateEach(S.Announcement, r.data?.announcements, `announcements(p${page})`, "announcements");
+      for (const a of raw) run.keepSigned("announcement", a.id, a.attachments);
+      return raw.map(normalizeAnnouncement);
     }, []);
     out.push(...batch);
     if (batch.length < 50) break;
@@ -131,6 +144,7 @@ function finish(
       unavailable: run.unavailable,
     },
     ...parts,
+    transient: { signedUrls: Object.fromEntries(run.signedUrls) },
     assignments: [...parts.assignments].sort((a, b) => (a.dueAt ?? "").localeCompare(b.dueAt ?? "") || a.sourceId.localeCompare(b.sourceId)),
     events: [...parts.events].sort((a, b) => a.startAt.localeCompare(b.startAt) || a.sourceId.localeCompare(b.sourceId)),
     announcements: [...parts.announcements].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.sourceId.localeCompare(b.sourceId)),

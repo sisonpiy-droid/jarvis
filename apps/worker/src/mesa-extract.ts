@@ -28,6 +28,7 @@ try {
   const dir = join(repoRoot(), "data", "snapshots");
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `mesa-${snapshot.meta.extractedAt.replace(/[:.]/g, "-")}.json`);
+  delete snapshot.transient; // signed URLs are credentials-in-a-URL: never written to disk
   writeFileSync(file, JSON.stringify(snapshot, null, 2));
 
   if (process.argv.includes("--stdout")) {

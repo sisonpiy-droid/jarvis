@@ -3,6 +3,7 @@
 // `npm run edge:build` into index.js, which is what gets deployed.
 
 import { connect } from "@jarvis/db";
+import { SupabaseStorage } from "@jarvis/files";
 import { TelegramChannel } from "@jarvis/notify";
 import { createLogger } from "@jarvis/shared";
 import { runMesaSync } from "@jarvis/sync";
@@ -32,7 +33,14 @@ async function sync(trigger: "schedule" | "manual", force?: "full" | "light") {
   const sql = connect(env("SUPABASE_DB_URL"));
   try {
     return await runMesaSync(
-      { sql, sessionKey: env("MESA_SESSION_KEY"), channel: new TelegramChannel(env("TELEGRAM_BOT_TOKEN"), env("TELEGRAM_CHAT_ID")), log },
+      {
+        sql,
+        sessionKey: env("MESA_SESSION_KEY"),
+        channel: new TelegramChannel(env("TELEGRAM_BOT_TOKEN"), env("TELEGRAM_CHAT_ID")),
+        // Both provided to Edge Functions by the platform.
+        storage: new SupabaseStorage(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY")),
+        log,
+      },
       { trigger, ...(force ? { force } : {}) },
     );
   } catch (err) {
