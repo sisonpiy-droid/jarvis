@@ -23,6 +23,8 @@ export interface BotDeps {
   triggerSync?: () => Promise<void>;
   /** Starts drafting an assignment (fire-and-forget; the draft arrives on Telegram). */
   requestDraft?: (assignmentId: string) => Promise<void>;
+  /** Saves an instruction for an assignment and redoes it. */
+  requestRevision?: (assignmentId: string, instruction: string) => Promise<void>;
   fetch?: typeof fetch;
   now?: () => Date;
 }
@@ -38,7 +40,8 @@ export const HELP = [
   "/tomorrow — tomorrow's classes",
   "/status — sync health and sign-in expiry",
   "/sync — check the LMS right now",
-  "/draft &lt;assignment&gt; — write a first draft (Word doc)",
+  "/draft &lt;assignment&gt; — do the assignment (doc + workbook/slides)",
+  "/revise &lt;assignment&gt; | &lt;what to change&gt; — edit it",
   "/memory — what I remember about you · /forget &lt;#&gt;",
   "",
   "<b>Or just ask</b>, e.g.",
@@ -47,6 +50,7 @@ export const HELP = [
   "• Find the slides on unit economics",
   "• Remind me at 9 pm to finish the case",
   "• Draft the Finance end-term assignment",
+  "• For marketing, our startup is Snitch — redo it",
 ].join("\n");
 
 async function telegram(deps: BotDeps, method: string, body: Record<string, unknown>) {
@@ -82,6 +86,17 @@ export async function commandReply(deps: BotDeps, cmd: string, arg = ""): Promis
       const id = Number(arg.replace(/^#/, ""));
       if (!Number.isInteger(id) || id <= 0) return "Which one? e.g. <code>/forget 12</code> (see /memory).";
       return (await forgetMemory(deps.sql, id)) ? `🗑️ Forgotten #${id}.` : `No active memory #${id}.`;
+    }
+    case "/revise": {
+      if (!deps.requestRevision) return "Revising isn't configured yet.";
+      const [q, ...rest] = arg.split("|");
+      const instruction = rest.join("|").trim();
+      if (!q?.trim() || !instruction) return "Use: <code>/revise marketing | our startup is Snitch</code>";
+      const r = await resolveAssignment(deps.sql, q.trim(), deps.now?.() ?? new Date());
+      if ("none" in r) return `No assignment matches “${esc(q.trim())}”. Try /due to see names.`;
+      if ("candidates" in r) return ["Several match — be more specific:", ...r.candidates.map((c) => `• ${esc(c.title)} — ${esc(c.due)}`)].join("\n");
+      await deps.requestRevision(String(r.one.sourceId), instruction);
+      return `✏️ Got it — for <b>${esc(r.one.title)}</b>: “${esc(instruction)}”.\nI'll remember this and send the revised files here in 1–3 minutes.`;
     }
     case "/draft": {
       if (!deps.requestDraft) return "Drafting isn't configured yet.";
@@ -156,7 +171,11 @@ export async function handleUpdate(deps: BotDeps, update: TelegramUpdate): Promi
     }
     await telegram(deps, "sendChatAction", { chat_id: deps.ownerChatId, action: "typing" }).catch(() => {});
     const res = await chat(
-      { sql: deps.sql, model: deps.model, ...(deps.now ? { now: deps.now } : {}), tools: jarvisTools(deps.sql, deps.now, deps.requestDraft ? { requestDraft: deps.requestDraft } : {}) },
+      { sql: deps.sql, model: deps.model, ...(deps.now ? { now: deps.now } : {}), tools: jarvisTools(deps.sql, deps.now, {
+          ...(deps.requestDraft ? { requestDraft: deps.requestDraft } : {}),
+          ...(deps.requestRevision ? { requestRevision: deps.requestRevision } : {}),
+        }),
+      },
       text,
     );
     await reply(deps, markdownToTelegramHtml(res.text));

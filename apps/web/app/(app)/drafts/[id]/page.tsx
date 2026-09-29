@@ -6,7 +6,7 @@ import { fmtDateTime, relative, shortCourse } from "@/lib/format";
 import { renderMarkdown } from "@/lib/markdown";
 import { storage } from "@/lib/storage";
 import { StatusBadge } from "../../ui";
-import { RedraftButton } from "./redraft-button";
+import { ReviseBox } from "./redraft-button";
 
 export default async function DraftPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -26,6 +26,7 @@ export default async function DraftPage({ params }: { params: Promise<{ id: stri
     body = `<pre class="whitespace-pre-wrap">${text.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</pre>`;
   }
   const files = await db()`select id, kind, filename, size_bytes from jarvis.draft_files where draft_id = ${Number(id)} order by case kind when 'xlsx' then 0 when 'pptx' then 1 else 2 end`;
+  const notes = await db()`select note, created_at from jarvis.assignment_notes where assignment_id = ${String(d.assignment_id)} order by id`;
   const sources = (d.sources as Array<{ label: string }> | null) ?? [];
   const at = d.created_at instanceof Date ? d.created_at.toISOString() : String(d.created_at);
 
@@ -58,10 +59,20 @@ export default async function DraftPage({ params }: { params: Promise<{ id: stri
         <a href={String(d.url)} target="_blank" rel="noreferrer" className="rounded-lg border border-[var(--color-line)] px-3 py-1.5 no-underline">
           Open in MESA LMS ↗
         </a>
-        <RedraftButton assignmentId={String(d.assignment_id)} />
       </div>
       {sources.length > 0 && <p className="mt-3 text-xs text-[var(--color-muted)]">Read: {sources.map((s) => s.label).join(" · ")}</p>}
       <p className="mt-1 text-xs text-[var(--color-muted)]">A starting point: verify anything marked [verify], fill placeholders, and make it your own before submitting.</p>
+      <ReviseBox assignmentId={String(d.assignment_id)} />
+      {notes.length > 0 && (
+        <div className="mt-2 text-sm text-[var(--color-muted)]">
+          <b className="font-medium text-[var(--color-ink)]">Your instructions for this assignment:</b>
+          <ol className="ml-5 mt-1 list-decimal">
+            {notes.map((n, i) => (
+              <li key={i}>{String(n.note)}</li>
+            ))}
+          </ol>
+        </div>
+      )}
       <article className="draft card mt-4 p-5 sm:p-7" dangerouslySetInnerHTML={{ __html: body }} />
     </main>
   );

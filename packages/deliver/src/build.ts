@@ -68,6 +68,8 @@ const PlanZ = z.object({
   deliverables: z.object({ workbook: z.boolean().default(false), slides: z.boolean().default(false), document: z.boolean().default(true) }),
   workbook: z.object({ mode: z.enum(["template", "new"]), dataSheet: z.string().nullish(), tasks: z.array(TaskZ).default([]) }).nullish(),
   notes: z.string().nullish(),
+  missing_inputs: z.array(z.object({ question: z.string(), why: z.string().nullish() })).nullish(),
+  blocking: z.boolean().nullish(),
 });
 const WriteupZ = z.object({
   answers: z.array(z.object({ sheet: z.string(), ref: z.string(), text: z.string() })).default([]),
@@ -125,8 +127,11 @@ If a workbook is needed, plan it as TASKS that JARVIS will execute exactly — y
 - mode "new": build a workbook from scratch; create sheets by naming them in tasks.
 Filters with "in" have no live formula; prefer eq/neq.
 
+STUDENT-ONLY INFORMATION: if the assignment depends on something only the student or their group knows — e.g. the specific company/startup/brand they were assigned, their group's own data, survey results, interviews, or personal experience — and it is not given in the sources or the STUDENT INSTRUCTIONS, do NOT pick a substitute. List each item in "missing_inputs" as a short direct question, and set "blocking": true if a correct submission is impossible without it.
+
 Reply with JSON only:
-{"deliverables":{"workbook":bool,"slides":bool,"document":true},
+{"missing_inputs":[{"question":"Which startup has your group been assigned?","why":"…"}],"blocking":false,
+ "deliverables":{"workbook":bool,"slides":bool,"document":true},
  "workbook": null | {"mode":"template"|"new","dataSheet":"<sheet with the data table or null>","tasks":[{"id":"q1","question":"…","sheet":"Q1","anchor":"A4","title":"…","pivot":{…}|null,"chart":{…}|null,"cells":[…]|null}]},
  "notes":"anything the student must know (e.g. inputs you could not source)"}`;
 
@@ -357,6 +362,12 @@ export async function deliverAssignment(deps: DeliverDeps, assignmentId: string,
     const g = await gather(deps, assignmentId);
     title = String(g.a.title);
     const memories = await listMemories(sql).catch(() => []);
+    const notes = await sql`select note, created_at from jarvis.assignment_notes where assignment_id = ${assignmentId} order by id`;
+    const [prev] = await sql`select markdown from jarvis.drafts where assignment_id = ${assignmentId} and status = 'done' and markdown is not null order by id desc limit 1`;
+    const instructions = notes.length
+      ? `\n\nSTUDENT INSTRUCTIONS for this assignment (highest priority — follow them over your own choices; if one conflicts with a hard requirement of the brief, follow the brief and say so in the notes). Latest last:\n${notes.map((n, i) => `${i + 1}. ${n.note}`).join("\n")}`
+      : "";
+    const previous = prev?.markdown && notes.length ? `\n\nPREVIOUS DRAFT (revise this according to the student's instructions; keep what is still valid):\n${String(prev.markdown).slice(0, 30_000)}` : "";
 
     // Workbook context for the planner.
     let wb: Workbook | null = g.template ? new Workbook(g.template.bytes) : null;
@@ -369,12 +380,29 @@ export async function deliverAssignment(deps: DeliverDeps, assignmentId: string,
     // 2. Plan.
     const plan = await generateJson(deps, PlanZ, "plan", {
       system: PLAN_SYSTEM + memoryBlock(memories),
-      contents: [{ role: "user", parts: [{ text: briefBlock(g.a) + wbContext + sourceText }, ...g.fileParts, { text: "\nReturn the plan JSON now." }] }],
+      contents: [{ role: "user", parts: [{ text: briefBlock(g.a) + instructions + wbContext + sourceText }, ...g.fileParts, { text: "\nReturn the plan JSON now." }] }],
       tools: [],
       json: true,
       temperature: 0.2,
     });
-    log?.info("plan", { deliverables: plan.deliverables, tasks: plan.workbook?.tasks.length ?? 0 });
+    log?.info("plan", { deliverables: plan.deliverables, tasks: plan.workbook?.tasks.length ?? 0, missing: plan.missing_inputs?.length ?? 0 });
+
+    // Stop and ask when the work depends on something only the student knows.
+    const missing = (plan.missing_inputs ?? []).filter((m) => m.question.trim());
+    if (plan.blocking && missing.length) {
+      await sql`update jarvis.drafts set status = 'needs_input', finished_at = now(), questions = ${sql.json(missing as never)} where id = ${draftId}`;
+      const short = String(g.a.title).replace(/\s*-\s*End Term Assignment$/i, "").slice(0, 40);
+      await deps.sendMessage(
+        [
+          `❓ <b>I need your input for: ${esc(title)}</b>`,
+          "",
+          ...missing.map((m) => `• ${esc(m.question)}${m.why ? ` <i>(${esc(m.why)})</i>` : ""}`),
+          "",
+          `Just tell me in chat, e.g. <i>“for ${esc(short)}, our startup is …”</i>, or send <code>/revise ${esc(short)} | …</code>. I'll do the assignment as soon as I have it.`,
+        ].join("\n"),
+      );
+      return { status: "skipped", reason: "needs input" };
+    }
 
     // 3. Compute: execute the workbook tasks exactly.
     const results: TaskResult[] = [];
@@ -420,7 +448,7 @@ export async function deliverAssignment(deps: DeliverDeps, assignmentId: string,
       .join("\n\n");
 
     // 4. Write-up.
-    const context = `${briefBlock(g.a)}\n\nDELIVERABLES: ${JSON.stringify(plan.deliverables)}\nPLANNER NOTES: ${plan.notes ?? "—"}\n\nCOMPUTED RESULTS (exact):\n${computed || "(no workbook tasks)"}\n${sourceText}`;
+    const context = `${briefBlock(g.a)}${instructions}${previous}\n\nDELIVERABLES: ${JSON.stringify(plan.deliverables)}\nPLANNER NOTES: ${plan.notes ?? "—"}\n\nCOMPUTED RESULTS (exact):\n${computed || "(no workbook tasks)"}\n${sourceText}`;
     const [wu, docReply] = await Promise.all([
       generateJson(deps, WriteupZ, "write-up", {
         system: WRITEUP_SYSTEM + memoryBlock(memories),

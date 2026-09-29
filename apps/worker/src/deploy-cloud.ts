@@ -97,7 +97,8 @@ const commands = [
   ["tomorrow", "Tomorrow's classes"],
   ["status", "Sync health and sign-in expiry"],
   ["sync", "Check the LMS right now"],
-  ["draft", "Draft an assignment (Word doc)"],
+  ["draft", "Do an assignment (doc + workbook/slides)"],
+  ["revise", "Edit an assignment: /revise name | change"],
   ["memory", "What JARVIS remembers about you"],
   ["help", "What JARVIS can do"],
 ].map(([command, description]) => ({ command, description }));

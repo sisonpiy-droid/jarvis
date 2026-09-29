@@ -57,6 +57,8 @@ export async function resolveAssignment(sql: Sql, query: string, now: Date = new
 export interface ToolOptions {
   /** Starts drafting an assignment in the background (result arrives on Telegram). */
   requestDraft?: (assignmentId: string) => Promise<void>;
+  /** Saves a standing instruction for an assignment and re-does it (result arrives on Telegram). */
+  requestRevision?: (assignmentId: string, instruction: string) => Promise<void>;
 }
 
 export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: ToolOptions = {}): Tool[] {
@@ -294,6 +296,31 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
         if ("candidates" in r) return { started: false, reason: "several match — ask which one", candidates: r.candidates };
         await requestDraft(String(r.one.sourceId));
         return { started: true, assignment: r.one.title, note: "The draft will arrive as a Word document on Telegram in 1–3 minutes." };
+      },
+    });
+  }
+  if (opts.requestRevision) {
+    const requestRevision = opts.requestRevision;
+    tools.push({
+      name: "revise_assignment",
+      effect: "write-local",
+      description:
+        "Change or correct an assignment JARVIS is doing: pass the student's instruction (e.g. 'our startup is Snitch', 'use Pune not Delhi', 'make the recommendation shorter', 'add a slide on pricing'). It is remembered for that assignment and the deliverables are redone (arrive on Telegram in 1–3 min). Use whenever the student gives information or feedback about a specific assignment's draft.",
+      parameters: obj(
+        {
+          query: { type: "string", description: "Assignment id or words from its title" },
+          instruction: { type: "string", description: "The student's instruction, in their words, self-contained" },
+        },
+        ["query", "instruction"],
+      ),
+      async run(a) {
+        const instruction = str(a.instruction).slice(0, 4000);
+        if (instruction.length < 2) throw new Error("instruction is required");
+        const r = await resolveAssignment(sql, str(a.query), now());
+        if ("none" in r) return { started: false, reason: "no matching assignment" };
+        if ("candidates" in r) return { started: false, reason: "several match — ask which one", candidates: r.candidates };
+        await requestRevision(String(r.one.sourceId), instruction);
+        return { started: true, assignment: r.one.title, note: "Saved for this assignment; the revised deliverables arrive on Telegram in 1–3 minutes." };
       },
     });
   }

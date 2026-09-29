@@ -3,7 +3,7 @@ import { GeminiProvider, chat, jarvisTools, markdownToTelegramHtml } from "@jarv
 import type { Sql } from "@jarvis/db";
 import { isSignedIn } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { requestDraft } from "@/lib/edge";
+import { requestDraft, requestRevision } from "@/lib/edge";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
         sql,
         model: new GeminiProvider(key, process.env.GEMINI_MODEL ?? "gemini-3.6-flash"),
         channel: "web",
-        tools: jarvisTools(sql, () => new Date(), { requestDraft }),
+        tools: jarvisTools(sql, () => new Date(), { requestDraft, requestRevision: (id, text) => requestRevision(id, text, "chat") }),
       },
       message,
     );

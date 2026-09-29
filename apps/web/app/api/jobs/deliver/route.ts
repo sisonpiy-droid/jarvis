@@ -28,7 +28,7 @@ function authorized(req: NextRequest): boolean {
 
 export async function POST(req: NextRequest) {
   if (!authorized(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const body = (await req.json().catch(() => ({}))) as { assignmentId?: string; trigger?: string };
+  const body = (await req.json().catch(() => ({}))) as { assignmentId?: string; trigger?: string; instruction?: string; source?: string };
   if (!body.assignmentId || !UUID.test(body.assignmentId)) return NextResponse.json({ error: "assignmentId required" }, { status: 400 });
   const key = process.env.GEMINI_API_KEY;
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -36,6 +36,11 @@ export async function POST(req: NextRequest) {
   if (!key || !token || !chat) return NextResponse.json({ error: "not configured" }, { status: 503 });
 
   const assignmentId = body.assignmentId;
+  const instruction = typeof body.instruction === "string" ? body.instruction.trim().slice(0, 4000) : "";
+  if (instruction) {
+    // Saved before the job runs, so it applies to this draft and every future one.
+    await (db() as unknown as Sql)`insert into jarvis.assignment_notes (assignment_id, note, source) values (${assignmentId}, ${instruction}, ${body.source === "web" ? "web" : "chat"})`;
+  }
   const trigger = body.trigger === "auto" ? "auto" : "request";
   const model = process.env.GEMINI_DRAFT_MODEL ?? process.env.GEMINI_MODEL ?? "gemini-3.6-flash";
   const tg = telegramSender(token, chat);

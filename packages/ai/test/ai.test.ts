@@ -156,3 +156,17 @@ describe("handleUpdate", () => {
     expect(String(sent[0]!.text)).toContain("isn't switched on yet");
   });
 });
+
+describe("/revise", () => {
+  const sql = vi.fn(async () => []) as unknown as Sql;
+  it("explains the format when the instruction is missing", async () => {
+    const { commandReply } = await import("../src/bot");
+    const out = await commandReply({ sql, token: "", ownerChatId: "", model: null, requestRevision: async () => {} }, "/revise", "marketing");
+    expect(out).toContain("/revise marketing | our startup is Snitch");
+  });
+  it("offers revise_assignment to the chat model only when revising is wired", () => {
+    expect(jarvisTools(sql).some((t) => t.name === "revise_assignment")).toBe(false);
+    const tool = jarvisTools(sql, () => new Date(), { requestRevision: async () => {} }).find((t) => t.name === "revise_assignment");
+    expect(tool?.effect).toBe("write-local");
+  });
+});

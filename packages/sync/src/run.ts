@@ -256,6 +256,9 @@ export async function nextToDraft(sql: Sql, now: Date, limit = 1): Promise<strin
        and not exists (select 1 from jarvis.drafts d where d.assignment_id = i.source_id and d.assignment_hash = i.content_hash and d.status = 'done' and d.pipeline = 'v2')
        and not exists (select 1 from jarvis.drafts d where d.assignment_id = i.source_id and d.created_at > ${new Date(now.getTime() - 20 * 60_000).toISOString()})
        and (select count(*) from jarvis.drafts d where d.assignment_id = i.source_id and d.assignment_hash = i.content_hash and d.status = 'failed') < 2
+       -- waiting on the student: skip until they add an instruction after the question was asked
+       and not exists (select 1 from jarvis.drafts d where d.assignment_id = i.source_id and d.assignment_hash = i.content_hash and d.status = 'needs_input'
+                        and d.created_at > coalesce((select max(n.created_at) from jarvis.assignment_notes n where n.assignment_id = i.source_id), '-infinity'::timestamptz))
      order by i.sort_at asc nulls last
      limit ${limit}`;
   return rows.map((r) => String(r.source_id));
