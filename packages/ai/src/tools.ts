@@ -138,7 +138,7 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
     {
       name: "get_schedule",
       effect: "read",
-      description: "Classes and events on a day (IST): time, course, title, room, status.",
+      description: "Schedule for a day (IST): MESA classes/events and personal Google Calendar events (source 'google'). Time, course, title, room/location, status.",
       parameters: obj({
         date: { type: "string", description: "'today', 'tomorrow', 'yesterday' or YYYY-MM-DD (default today)" },
         days: { type: "integer", description: "Number of days from that date (default 1, max 14)" },
@@ -147,9 +147,9 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
         const r = istRange(str(a.date) || "today", clampInt(a.days, 1, 14, 1), now());
         const rows = await sql`
           select data from jarvis.lms_items
-           where kind = 'event' and removed_at is null and sort_at >= ${r.from} and sort_at < ${r.to}
+           where kind in ('event', 'gcal_event') and removed_at is null and sort_at >= ${r.from} and sort_at < ${r.to}
            order by sort_at`;
-        return rows.map(({ data: d }) => ({ when: d.startAtIst, ends: fmt(d.endAt), course: d.courseName, title: d.title, type: d.eventType, room: d.room, status: d.status, instructor: d.instructor }));
+        return rows.map(({ data: d }) => ({ source: d.source === "gcal" ? "google" : "mesa", when: d.startAtIst, ends: d.allDay ? null : fmt(d.endAt), course: d.courseName, title: d.title, type: d.eventType, room: d.room, status: d.status, instructor: d.instructor }));
       },
     },
     {

@@ -87,12 +87,14 @@ export interface ClassRow {
   status: string | null;
   type: string | null;
   instructor: string | null;
+  personal: boolean;
+  allDay: boolean;
 }
 
 export async function classesBetween(from: string, to: string): Promise<ClassRow[]> {
   const rows = await db()`
     select source_id, title, data from jarvis.lms_items
-     where kind = 'event' and removed_at is null and sort_at >= ${from} and sort_at < ${to} order by sort_at`;
+     where kind in ('event', 'gcal_event') and removed_at is null and sort_at >= ${from} and sort_at < ${to} order by sort_at`;
   return rows.map((r) => {
     const d = r.data as J;
     return {
@@ -105,6 +107,8 @@ export async function classesBetween(from: string, to: string): Promise<ClassRow
       status: (d.status as string | null) ?? null,
       type: (d.eventType as string | null) ?? null,
       instructor: (d.instructor as string | null) ?? null,
+      personal: d.source === "gcal",
+      allDay: d.allDay === true,
     };
   });
 }

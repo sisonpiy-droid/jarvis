@@ -21,16 +21,16 @@ export default async function TodayPage() {
       </p>
 
       <div className="grid gap-x-4 md:grid-cols-2">
-        <Section title={`Today's classes (${classes.filter((c) => c.status !== "cancelled").length})`} action={<More href="/classes">Week</More>}>
+        <Section title={`Today (${classes.filter((c) => c.status !== "cancelled").length})`} action={<More href="/classes">Week</More>}>
           {classes.length ? (
             <ul className="space-y-2.5">
               {classes.map((c) => (
                 <li key={c.id} className={`flex gap-3 ${c.status === "cancelled" ? "opacity-50 line-through" : ""}`}>
-                  <span className="w-20 shrink-0 text-sm tabular-nums text-[var(--color-muted)]">{fmtTime(c.startAt)}</span>
+                  <span className="w-20 shrink-0 text-sm tabular-nums text-[var(--color-muted)]">{c.allDay ? "All day" : fmtTime(c.startAt)}</span>
                   <span className="min-w-0">
-                    <span className="block font-medium">{shortCourse(c.course ?? c.title)}</span>
+                    <span className="block font-medium">{c.personal ? c.title : shortCourse(c.course ?? c.title)}</span>
                     <span className="block text-sm text-[var(--color-muted)]">
-                      {[c.title !== c.course ? c.title : null, c.room].filter(Boolean).join(" · ")}
+                      {[c.personal ? "Personal" : c.title !== c.course ? c.title : null, c.room].filter(Boolean).join(" · ")}
                     </span>
                   </span>
                 </li>

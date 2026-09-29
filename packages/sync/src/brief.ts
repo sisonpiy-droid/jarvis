@@ -27,6 +27,8 @@ export interface BriefData {
   classes: Array<{ title: string; course: string | null; startAt: string; room: string | null; status: string | null }>;
   due: Array<{ title: string; course: string | null; dueAt: string; dueIst: string | null }>;
   newSince: { announcements: number; materials: number; recordings: number; assignments: number };
+  /** All-day personal calendar entries today (birthdays, holidays, trips…). */
+  allDay?: string[];
   sessionExpiresAt: string | null;
 }
 
@@ -34,8 +36,9 @@ export function renderBrief(d: BriefData, now: Date): string {
   const day = istDay(now);
   const short = (c: string | null) => (c ? c.replace(/\s+with\s+.*$/i, "") : null);
   const lines = [`☀️ <b>Good morning — ${esc(day.label)}</b>`, ""];
+  if (d.allDay?.length) lines.push(`📌 Today: ${d.allDay.map((t) => esc(t)).join(", ")}`, "");
   const live = d.classes.filter((c) => c.status !== "cancelled");
-  lines.push(live.length ? `🏫 <b>Today's classes (${live.length})</b>` : "🏫 No classes today.");
+  lines.push(live.length ? `🏫 <b>Today's schedule (${live.length})</b>` : "🏫 Nothing scheduled today.");
   for (const c of live) lines.push(`• ${time(c.startAt)} — ${esc(short(c.course) ?? c.title)}${c.course && c.title !== c.course ? `: ${esc(c.title)}` : ""}${c.room ? ` <i>(${esc(c.room)})</i>` : ""}`);
   const cancelled = d.classes.filter((c) => c.status === "cancelled");
   if (cancelled.length) lines.push(`❌ Cancelled: ${cancelled.map((c) => esc(c.title)).join(", ")}`);
@@ -66,7 +69,8 @@ export async function loadBriefData(sql: Sql, now: Date): Promise<BriefData> {
   const classes = await sql`
     select title, data ->> 'courseName' as course, data ->> 'startAt' as start_at, data ->> 'room' as room, data ->> 'status' as status
       from jarvis.lms_items
-     where kind = 'event' and removed_at is null and sort_at >= ${day.start} and sort_at < ${day.end}
+     where kind in ('event', 'gcal_event') and removed_at is null and sort_at >= ${day.start} and sort_at < ${day.end}
+       and not coalesce((data ->> 'allDay')::boolean, false)
      order by sort_at`;
   const due = await sql`
     select title, data ->> 'courseTitle' as course, data ->> 'dueAt' as due_at, data ->> 'dueAtIst' as due_ist
@@ -81,11 +85,16 @@ export async function loadBriefData(sql: Sql, now: Date): Promise<BriefData> {
      group by kind`;
   const c = Object.fromEntries(counts.map((r) => [r.kind as string, r.n as number]));
   const [integ] = await sql`select session_expires_at from jarvis.integrations where provider = 'mesa'`;
+  const allDay = await sql`
+    select title from jarvis.lms_items
+     where kind = 'gcal_event' and removed_at is null and (data ->> 'allDay')::boolean
+       and sort_at >= ${day.start} and sort_at < ${day.end} order by title`;
   return {
     classes: classes.map((r) => ({ title: r.title, course: r.course, startAt: r.start_at, room: r.room, status: r.status })),
     due: due.map((r) => ({ title: r.title, course: r.course, dueAt: r.due_at, dueIst: r.due_ist })),
     newSince: { announcements: c.announcement ?? 0, materials: c.material ?? 0, recordings: c.recording ?? 0, assignments: c.assignment ?? 0 },
     sessionExpiresAt: integ?.session_expires_at ? new Date(integ.session_expires_at).toISOString() : null,
+    allDay: allDay.map((r) => String(r.title)),
   };
 }
 

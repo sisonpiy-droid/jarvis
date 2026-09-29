@@ -40,6 +40,7 @@ async function sync(trigger: "schedule" | "manual", force?: "full" | "light") {
         // Both provided to Edge Functions by the platform.
         storage: new SupabaseStorage(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY")),
         log,
+        icsUrl: Deno.env.get("GCAL_ICS_URL") ?? null,
         // Auto-draft new assignments unless AUTO_DRAFT=off (and only when an AI key is configured).
         ...(Deno.env.get("GEMINI_API_KEY") && Deno.env.get("AUTO_DRAFT") !== "off"
           ? {

@@ -14,6 +14,7 @@ import { fetchPendingFiles, type BlobStorage, type FetchResult } from "@jarvis/f
 import { planMessages, type Channel } from "@jarvis/notify";
 import type { Logger } from "@jarvis/shared";
 import { morningBrief } from "./brief";
+import { syncCalendar } from "./calendar";
 import { dbSessionStore } from "./db-session";
 import { diffItems, type Diff, type Keyed } from "./diff";
 import {
@@ -41,6 +42,8 @@ export interface SyncDeps {
   channel: Channel | null;
   /** Called with newly published, unsubmitted assignments (e.g. to auto-draft them). Never blocks the sync. */
   onNewAssignments?: (ids: string[]) => Promise<void>;
+  /** Private Google Calendar iCal URL; when set, each run also syncs the calendar. */
+  icsUrl?: string | null;
   /** When set, each run also downloads a few pending LMS files into Storage. */
   storage?: BlobStorage | null;
   log: Logger;
@@ -126,6 +129,9 @@ export async function runMesaSync(deps: SyncDeps, opts: SyncOptions): Promise<Sy
     return { status: "skipped" };
   }
   try {
+    if (deps.icsUrl) {
+      await syncCalendar(sql, deps.icsUrl, now, log, deps.fetch).catch((err) => log.warn("calendar sync failed", { error: err }));
+    }
     const integ = await db.getIntegration(sql, PROVIDER);
     if (!integ?.secretSealed) throw new MesaAuthError("No MESA session in the database — run `npm run mesa:login`", "NO_SESSION");
 

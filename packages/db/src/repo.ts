@@ -3,7 +3,7 @@ import type { Sql, Tx } from "./client";
 // Thin, explicit SQL. Every write here is idempotent: re-running a sync over
 // unchanged data only bumps last_seen_at.
 
-export type ItemKind = "course" | "material" | "recording" | "assignment" | "event" | "announcement";
+export type ItemKind = "course" | "material" | "recording" | "assignment" | "event" | "announcement" | "gcal_event";
 
 export interface StoredItem {
   sourceId: string;

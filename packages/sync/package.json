@@ -9,6 +9,7 @@
     "@jarvis/mesa": "*",
     "@jarvis/notify": "*",
     "@jarvis/shared": "*",
-    "@jarvis/files": "*"
+    "@jarvis/files": "*",
+    "@jarvis/calendar": "*"
   }
 }

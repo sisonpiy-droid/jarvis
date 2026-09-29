@@ -35,6 +35,7 @@ try {
       channel: token && chat ? new TelegramChannel(token, chat) : null,
       storage: process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY ? new SupabaseStorage(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY) : null,
       log,
+      icsUrl: process.env.GCAL_ICS_URL ?? null,
       maxConcurrency: intEnv("MESA_MAX_CONCURRENCY", 3),
       minGapMs: intEnv("MESA_MIN_GAP_MS", 150),
     },

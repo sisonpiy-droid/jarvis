@@ -29,11 +29,16 @@ export default async function ClassesPage() {
               {items.map((c) => (
                 <li key={c.id} className={`flex gap-3 text-sm ${c.status === "cancelled" ? "opacity-50 line-through" : ""}`}>
                   <span className="w-28 shrink-0 tabular-nums text-[var(--color-muted)]">
-                    {fmtTime(c.startAt)}–{fmtTime(c.endAt)}
+                    {c.allDay ? "All day" : `${fmtTime(c.startAt)}–${fmtTime(c.endAt)}`}
                   </span>
                   <span className="min-w-0">
-                    <b className="font-medium">{shortCourse(c.course ?? c.title)}</b>
-                    {c.title !== c.course && <span className="text-[var(--color-muted)]"> · {c.title}</span>}
+                    <b className="font-medium">{c.personal ? c.title : shortCourse(c.course ?? c.title)}</b>
+                    {!c.personal && c.title !== c.course && <span className="text-[var(--color-muted)]"> · {c.title}</span>}
+                    {c.personal && (
+                      <span className="ml-2">
+                        <Badge>Personal</Badge>
+                      </span>
+                    )}
                     {c.room && <span className="text-[var(--color-muted)]"> · {c.room}</span>}
                     {c.type === "exam" && (
                       <span className="ml-2">
