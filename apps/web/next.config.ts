@@ -8,8 +8,10 @@ if (!process.env.VERCEL && existsSync(rootEnv)) process.loadEnvFile(rootEnv);
 
 const config: NextConfig = {
   // Workspace packages ship TypeScript source.
-  transpilePackages: ["@jarvis/ai", "@jarvis/assist", "@jarvis/db", "@jarvis/files", "@jarvis/shared"],
+  transpilePackages: ["@jarvis/ai", "@jarvis/assist", "@jarvis/deliver", "@jarvis/db", "@jarvis/files", "@jarvis/shared"],
   poweredByHeader: false,
+  // Loaded at runtime from node_modules rather than bundled.
+  serverExternalPackages: ["postgres"],
   async headers() {
     return [
       {

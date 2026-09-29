@@ -8,7 +8,8 @@ export default async function DraftsPage() {
   const rows = await db()`
     select distinct on (d.assignment_id)
            d.id, d.status, d.trigger, d.created_at, d.summary, d.error, d.assignment_id,
-           i.title, i.data ->> 'courseTitle' as course, i.data ->> 'dueAt' as due_at, i.data ->> 'submissionStatus' as sub
+           i.title, i.data ->> 'courseTitle' as course, i.data ->> 'dueAt' as due_at, i.data ->> 'submissionStatus' as sub,
+           (select string_agg(kind, ',' order by kind) from jarvis.draft_files f where f.draft_id = d.id) as kinds
       from jarvis.drafts d join jarvis.lms_items i on i.kind = 'assignment' and i.source_id = d.assignment_id
      order by d.assignment_id, (d.status = 'done') desc, d.id desc`;
   const [pending] = await db()`
@@ -29,6 +30,7 @@ export default async function DraftsPage() {
       course: r.course as string | null,
       dueAt: r.due_at as string | null,
       sub: String(r.sub),
+      kinds: String(r.kinds ?? "docx").split(","),
     }))
     // Open work first, soonest deadline first, undated last (plain string order: ISO dates sort correctly).
     .sort((a, b) => (isSubmitted(a.sub) ? 1 : 0) - (isSubmitted(b.sub) ? 1 : 0) || ((a.dueAt ?? "9999") < (b.dueAt ?? "9999") ? -1 : (a.dueAt ?? "9999") > (b.dueAt ?? "9999") ? 1 : 0));
@@ -37,7 +39,7 @@ export default async function DraftsPage() {
     <main>
       <h1 className="text-2xl font-semibold tracking-tight">Drafts</h1>
       <p className="mt-1 text-sm text-[var(--color-muted)]">
-        JARVIS drafts every open assignment — one every few minutes.{" "}
+        JARVIS completes every open assignment — a document, plus a filled workbook and slides when the assignment needs them.{" "}
         {(pending?.n ?? 0) > 0 ? `${pending!.n} still in the queue.` : "All open assignments have a draft."}
       </p>
       <Section title={`All drafts (${drafts.length})`}>
@@ -54,6 +56,8 @@ export default async function DraftsPage() {
                     <span className="font-medium">{d.title}</span>
                   )}
                   <StatusBadge status={d.sub} dueAt={d.dueAt} />
+                  {d.status === "done" && d.kinds.includes("xlsx") && <Badge tone="good">📊 workbook</Badge>}
+                  {d.status === "done" && d.kinds.includes("pptx") && <Badge tone="good">📽️ slides</Badge>}
                   {d.status !== "done" && <Badge tone={d.status === "failed" ? "bad" : "warn"}>{d.status === "failed" ? "draft failed" : "drafting…"}</Badge>}
                 </div>
                 <div className="mt-0.5 text-sm text-[var(--color-muted)]">
@@ -64,7 +68,7 @@ export default async function DraftsPage() {
                 {d.status === "done" && (
                   <div className="mt-2 flex gap-4 text-sm">
                     <Link href={`/drafts/${d.id}`}>Read draft</Link>
-                    <a href={`/api/drafts/${d.id}/docx`}>Download .docx</a>
+                    <Link href={`/drafts/${d.id}`}>Downloads</Link>
                     <Link href={`/assignments/${d.assignmentId}`}>Assignment</Link>
                   </div>
                 )}

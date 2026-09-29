@@ -37,7 +37,7 @@ async function processUpdate(update: TelegramUpdate) {
           await fetch(syncUrl, { method: "POST", headers: { Authorization: `Bearer ${env("CRON_SECRET")}` } });
         },
         requestDraft: async (assignmentId) => {
-          await fetch(`${env("SUPABASE_URL")}/functions/v1/assignment-draft`, {
+          await fetch(`${env("JARVIS_WEB_URL")}/api/jobs/deliver`, {
             method: "POST",
             headers: { Authorization: `Bearer ${env("CRON_SECRET")}`, "Content-Type": "application/json" },
             body: JSON.stringify({ assignmentId, trigger: "request" }),

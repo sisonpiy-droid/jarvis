@@ -15,7 +15,7 @@ possible, and doc updates.
 | 6 | Dashboard | ✅ 2026-09-29 (Vercel, Telegram magic-link login) | Next.js: Today / Assignments / Classes / Sync-runs debug page, behind Supabase Auth |
 | 7 | JARVIS chat + tools | ✅ 2026-09-29 (Telegram, Gemini free tier) | Provider-agnostic LLM layer; read tools over the DB; `create_task` / `create_reminder`; chat answers "what's due this week?" from real data |
 | 8 | Gmail + Calendar | 🟡 Calendar ✅ (personal Google Calendar via private iCal feed). Gmail ⏸ deferred by choice (most communication is on the LMS) | OAuth, read-only sync, classification, draft replies (approval-gated send) |
-| 9 | Assignment intelligence | ✅ 2026-09-29 (drafts → .docx on Telegram; auto for new work, /draft on request) | Brief parsing (PDF/DOCX/PPTX/XLSX), requirement extraction, material retrieval, draft deliverables, checks against the original |
+| 9 | Assignment intelligence | ✅ v2 2026-09-29: finished deliverables — filled Excel templates (exact pivots as live formulas + native charts), slide decks with native charts, Word doc; runs on Vercel (/api/jobs/deliver) | Brief parsing (PDF/DOCX/PPTX/XLSX), requirement extraction, material retrieval, draft deliverables, checks against the original |
 | 10 | 24/7 orchestration | 🟡 monitoring live on Supabase (pg_cron → Edge Function, every 5 min, ₹0) | Daily brief, health page |
 
 ## Current state (2026-09-29)

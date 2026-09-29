@@ -42,12 +42,12 @@ async function sync(trigger: "schedule" | "manual", force?: "full" | "light") {
         log,
         icsUrl: Deno.env.get("GCAL_ICS_URL") ?? null,
         // Auto-draft new assignments unless AUTO_DRAFT=off (and only when an AI key is configured).
-        ...(Deno.env.get("GEMINI_API_KEY") && Deno.env.get("AUTO_DRAFT") !== "off"
+        ...(Deno.env.get("GEMINI_API_KEY") && Deno.env.get("JARVIS_WEB_URL") && Deno.env.get("AUTO_DRAFT") !== "off"
           ? {
               // Drafts the backlog one assignment per run (see nextToDraft).
               onNewAssignments: async (ids: string[]) => {
                 for (const assignmentId of ids) {
-                  await fetch(`${env("SUPABASE_URL")}/functions/v1/assignment-draft`, {
+                  await fetch(`${env("JARVIS_WEB_URL")}/api/jobs/deliver`, {
                     method: "POST",
                     headers: { Authorization: `Bearer ${env("CRON_SECRET")}`, "Content-Type": "application/json" },
                     body: JSON.stringify({ assignmentId, trigger: "auto" }),

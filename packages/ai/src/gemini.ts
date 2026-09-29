@@ -27,6 +27,9 @@ export interface GenerateRequest {
   system: string;
   contents: Content[];
   tools: FunctionDeclaration[];
+  /** Ask for a JSON reply (no tools allowed in this mode). */
+  json?: boolean;
+  temperature?: number;
 }
 
 export interface ModelProvider {
@@ -46,7 +49,7 @@ export class GeminiProvider implements ModelProvider {
       systemInstruction: { parts: [{ text: req.system }] },
       contents: req.contents,
       ...(req.tools.length ? { tools: [{ functionDeclarations: req.tools }] } : {}),
-      generationConfig: { temperature: 0.4 },
+      generationConfig: { temperature: req.temperature ?? 0.4, ...(req.json ? { responseMimeType: "application/json" } : {}) },
     };
     const res = await this.fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`, {
       method: "POST",

@@ -253,7 +253,7 @@ export async function nextToDraft(sql: Sql, now: Date, limit = 1): Promise<strin
      where i.kind = 'assignment' and i.removed_at is null
        and i.data ->> 'submissionStatus' not in ('submitted', 'submitted_late')
        and (i.sort_at is null or i.sort_at > ${now.toISOString()})
-       and not exists (select 1 from jarvis.drafts d where d.assignment_id = i.source_id and d.assignment_hash = i.content_hash and d.status = 'done')
+       and not exists (select 1 from jarvis.drafts d where d.assignment_id = i.source_id and d.assignment_hash = i.content_hash and d.status = 'done' and d.pipeline = 'v2')
        and not exists (select 1 from jarvis.drafts d where d.assignment_id = i.source_id and d.created_at > ${new Date(now.getTime() - 20 * 60_000).toISOString()})
        and (select count(*) from jarvis.drafts d where d.assignment_id = i.source_id and d.assignment_hash = i.content_hash and d.status = 'failed') < 2
      order by i.sort_at asc nulls last

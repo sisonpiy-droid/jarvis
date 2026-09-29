@@ -15,6 +15,13 @@ export function telegramSender(token: string, chatId: string, fetchImpl: typeof 
       });
       await check(res, "sendMessage");
     },
+    async sendFile(bytes: Uint8Array, filename: string, mime: string, caption: string) {
+      const form = new FormData();
+      form.append("chat_id", chatId);
+      form.append("caption", caption.slice(0, 1024));
+      form.append("document", new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mime }), filename);
+      await check(await fetchImpl(`${api}/sendDocument`, { method: "POST", body: form }), "sendDocument");
+    },
     async sendDocument(bytes: Uint8Array, filename: string, caption: string) {
       const form = new FormData();
       form.append("chat_id", chatId);

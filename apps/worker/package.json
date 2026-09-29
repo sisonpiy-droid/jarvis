@@ -11,7 +11,8 @@
     "sync:mesa": "tsx src/sync-mesa.ts",
     "deploy:cloud": "tsx src/deploy-cloud.ts",
     "draft": "tsx src/draft-assignment.ts",
-    "draft:all": "tsx src/draft-all.ts"
+    "draft:all": "tsx src/draft-all.ts",
+    "deliver": "tsx src/deliver.ts"
   },
   "dependencies": {
     "@jarvis/db": "*",
@@ -22,6 +23,7 @@
     "postgres": "*",
     "@jarvis/ai": "*",
     "@jarvis/assist": "*",
-    "@jarvis/files": "*"
+    "@jarvis/files": "*",
+    "@jarvis/deliver": "*"
   }
 }

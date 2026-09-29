@@ -1,0 +1,17 @@
+{
+  "name": "@jarvis/deliver",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@jarvis/ai": "*",
+    "@jarvis/assist": "*",
+    "@jarvis/db": "*",
+    "@jarvis/files": "*",
+    "@jarvis/shared": "*",
+    "fflate": "*",
+    "pptxgenjs": "^4.0.1",
+    "zod": "^4.6.5"
+  }
+}

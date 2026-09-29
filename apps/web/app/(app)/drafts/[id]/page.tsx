@@ -25,6 +25,7 @@ export default async function DraftPage({ params }: { params: Promise<{ id: stri
     const text = extractOfficeText(await storage().download(String(d.storage_path)), "docx");
     body = `<pre class="whitespace-pre-wrap">${text.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</pre>`;
   }
+  const files = await db()`select id, kind, filename, size_bytes from jarvis.draft_files where draft_id = ${Number(id)} order by case kind when 'xlsx' then 0 when 'pptx' then 1 else 2 end`;
   const sources = (d.sources as Array<{ label: string }> | null) ?? [];
   const at = d.created_at instanceof Date ? d.created_at.toISOString() : String(d.created_at);
 
@@ -43,9 +44,17 @@ export default async function DraftPage({ params }: { params: Promise<{ id: stri
         <span>· drafted {fmtDateTime(at)}</span>
       </div>
       <div className="mt-3 flex flex-wrap gap-3 text-sm">
-        <a href={`/api/drafts/${d.id}/docx`} className="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 font-medium text-white no-underline">
-          Download .docx
-        </a>
+        {files.length ? (
+          files.map((f) => (
+            <a key={String(f.id)} href={`/api/drafts/${d.id}/files/${f.id}`} className="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 font-medium text-white no-underline">
+              {f.kind === "xlsx" ? "📊 Workbook (.xlsx)" : f.kind === "pptx" ? "📽️ Slides (.pptx)" : "📄 Document (.docx)"}
+            </a>
+          ))
+        ) : (
+          <a href={`/api/drafts/${d.id}/docx`} className="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 font-medium text-white no-underline">
+            📄 Document (.docx)
+          </a>
+        )}
         <a href={String(d.url)} target="_blank" rel="noreferrer" className="rounded-lg border border-[var(--color-line)] px-3 py-1.5 no-underline">
           Open in MESA LMS ↗
         </a>
