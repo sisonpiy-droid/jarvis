@@ -1,4 +1,4 @@
-import type { ModelProvider, Part } from "@jarvis/ai";
+import { listMemories, memoryBlock, type ModelProvider, type Part } from "@jarvis/ai";
 import type { Sql } from "@jarvis/db";
 import type { SupabaseStorage } from "@jarvis/files";
 import type { Logger } from "@jarvis/shared";
@@ -193,7 +193,8 @@ export async function draftAssignment(deps: DraftDeps, assignmentId: string, tri
     log?.info("drafting", { assignment: a.title, sources: used_sources.length, inlineBytes: used });
 
     // 4. Draft.
-    const reply = await deps.model.generate({ system: DRAFT_SYSTEM, contents: [{ role: "user", parts }], tools: [] });
+    const memories = await listMemories(sql).catch(() => []);
+    const reply = await deps.model.generate({ system: DRAFT_SYSTEM + memoryBlock(memories), contents: [{ role: "user", parts }], tools: [] });
     const md = stripLatex(reply.parts.filter((p) => p.text && !p.thought).map((p) => p.text).join("").trim());
     if (md.length < 200) throw new Error("the model returned an unusually short draft");
 

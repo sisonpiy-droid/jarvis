@@ -98,6 +98,7 @@ const commands = [
   ["status", "Sync health and sign-in expiry"],
   ["sync", "Check the LMS right now"],
   ["draft", "Draft an assignment (Word doc)"],
+  ["memory", "What JARVIS remembers about you"],
   ["help", "What JARVIS can do"],
 ].map(([command, description]) => ({ command, description }));
 await fetch(`https://api.telegram.org/bot${need("TELEGRAM_BOT_TOKEN")}/setMyCommands`, {

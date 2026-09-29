@@ -2,6 +2,7 @@ import type { Sql } from "@jarvis/db";
 import type { ModelProvider } from "./gemini";
 import { chat } from "./jarvis";
 import { markdownToTelegramHtml, splitForTelegram } from "./telegram-format";
+import { forgetMemory, listMemories } from "./memory";
 import { jarvisTools, resolveAssignment } from "./tools";
 
 // Telegram front door. Only the owner's chat is served; every other sender is
@@ -38,6 +39,7 @@ export const HELP = [
   "/status — sync health and sign-in expiry",
   "/sync — check the LMS right now",
   "/draft &lt;assignment&gt; — write a first draft (Word doc)",
+  "/memory — what I remember about you · /forget &lt;#&gt;",
   "",
   "<b>Or just ask</b>, e.g.",
   "• What's due this week?",
@@ -71,6 +73,16 @@ export async function reply(deps: BotDeps, html: string) {
 export async function commandReply(deps: BotDeps, cmd: string, arg = ""): Promise<string | null> {
   const tools = new Map(jarvisTools(deps.sql, deps.now).map((t) => [t.name, t]));
   switch (cmd) {
+    case "/memory": {
+      const mems = await listMemories(deps.sql);
+      if (!mems.length) return "🧠 I don't remember anything about you yet. Tell me things like “I prefer short answers” or “my BYOB group is …”.";
+      return ["🧠 <b>What I remember</b>", ...mems.map((m) => `#${m.id} · <i>${m.kind}</i> — ${esc(m.content)}`), "", "Remove one with <code>/forget 12</code>."].join("\n");
+    }
+    case "/forget": {
+      const id = Number(arg.replace(/^#/, ""));
+      if (!Number.isInteger(id) || id <= 0) return "Which one? e.g. <code>/forget 12</code> (see /memory).";
+      return (await forgetMemory(deps.sql, id)) ? `🗑️ Forgotten #${id}.` : `No active memory #${id}.`;
+    }
     case "/draft": {
       if (!deps.requestDraft) return "Drafting isn't configured yet.";
       if (!arg) return "Which one? e.g. <code>/draft Finance end term</code>";
