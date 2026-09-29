@@ -1,0 +1,8 @@
+# Minimal Supabase CLI config — only used to deploy the Edge Function.
+project_id = "jarvis"
+
+[functions.mesa-sync]
+# Called by pg_cron with a shared secret (checked in code), not a user JWT.
+verify_jwt = false
+# Pre-bundled by `npm run edge:build` from packages/* (see entry.ts).
+entrypoint = "./functions/mesa-sync/index.js"

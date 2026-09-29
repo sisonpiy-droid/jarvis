@@ -1,0 +1,13 @@
+{
+  "name": "@jarvis/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./migrate": "./src/migrate.ts"
+  },
+  "dependencies": {
+    "postgres": "*"
+  }
+}

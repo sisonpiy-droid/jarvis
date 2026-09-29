@@ -1,0 +1,22 @@
+{
+  "name": "@jarvis/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "mesa:login": "tsx src/mesa-login.ts",
+    "mesa:extract": "tsx src/mesa-extract.ts",
+    "setup:db": "tsx src/setup-db.ts",
+    "db:migrate": "tsx src/db-migrate.ts",
+    "sync:mesa": "tsx src/sync-mesa.ts",
+    "deploy:cloud": "tsx src/deploy-cloud.ts"
+  },
+  "dependencies": {
+    "@jarvis/db": "*",
+    "@jarvis/mesa": "*",
+    "@jarvis/notify": "*",
+    "@jarvis/shared": "*",
+    "@jarvis/sync": "*",
+    "postgres": "*"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@jarvis/mesa",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./login": "./src/login.ts",
+    "./file-session": "./src/file-session.ts"
+  },
+  "dependencies": { "@jarvis/shared": "*" }
+}
