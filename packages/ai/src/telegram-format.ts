@@ -8,7 +8,8 @@ export function markdownToTelegramHtml(md: string): string {
   s = s.replace(/`([^`\n]+)`/g, (_, c: string) => `\u0000${code.push(`<code>${esc(c)}</code>`) - 1}\u0000`);
   s = esc(s)
     .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, t: string, u: string) => `<a href="${u.replace(/"/g, "&quot;")}">${t}</a>`)
-    .replace(/^#{1,6}\s+(.+)$/gm, "<b>$1</b>")
+    .replace(/^#{1,6}\s+(.+)$/gm, (_, h: string) => `<b>${h.replace(/\*\*|__/g, "")}</b>`)
+    .replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, "━━━━━━━━━━")
     .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
     .replace(/__([^_\n]+)__/g, "<b>$1</b>")
     .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?:;]|$)/g, "$1<i>$2</i>")

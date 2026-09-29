@@ -88,6 +88,9 @@ describe("telegram formatting", () => {
       '<b>Due</b> &lt;soon&gt; &amp; <i>today</i>\n• one\n• <a href="https://x.y/a?b=1">LMS</a>',
     );
   });
+  it("doesn't double-bold headings and turns rules into a divider", () => {
+    expect(markdownToTelegramHtml("## **Plan**\n---\nok")).toBe("<b>Plan</b>\n━━━━━━━━━━\nok");
+  });
   it("keeps code verbatim and escaped", () => {
     expect(markdownToTelegramHtml("run `npm run mesa:login` **now**")).toBe("run <code>npm run mesa:login</code> <b>now</b>");
   });
