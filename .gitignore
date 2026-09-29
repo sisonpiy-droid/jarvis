@@ -16,3 +16,6 @@ Thumbs.db
 supabase/functions/*/index.js
 supabase/.temp/
 deno.lock
+apps/web/.next/
+apps/web/next-env.d.ts
+.vercel/

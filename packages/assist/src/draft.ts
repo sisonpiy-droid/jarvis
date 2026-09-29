@@ -73,7 +73,15 @@ export function rankMaterials<T extends { title: string; topic: string | null; s
 /** Pulls sections 1–2 out of the draft for the Telegram summary. */
 export function summarize(md: string, max = 1500): string {
   const m = md.match(/##\s*1\.[\s\S]*?(?=##\s*3\.|$)/);
-  const s = (m?.[0] ?? md).replace(/^##\s*/gm, "").trim();
+  // Plain text for Telegram/HTML previews: drop heading marks and emphasis, keep bullets readable.
+  const s = (m?.[0] ?? md)
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/(^|\s)[*_]([^*_\n]+)[*_](?=\s|[.,;:!?)]|$)/g, "$1$2")
+    .replace(/^(\s*)[*-]\s+/gm, "$1• ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
   return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 

@@ -54,6 +54,9 @@ describe("summarize", () => {
     expect(s).toContain("Approach");
     expect(s).not.toContain("long body");
   });
+  it("strips Markdown emphasis so previews read as plain text", () => {
+    expect(summarize("## 1. What's being asked\n* **Scope:** analyse *five* peers\n## 3. Draft\nx")).toBe("1. What's being asked\n• Scope: analyse five peers");
+  });
 });
 
 describe("DRAFT_SYSTEM", () => {

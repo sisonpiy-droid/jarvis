@@ -43,12 +43,15 @@ export interface ChatDeps {
   model: ModelProvider;
   now?: () => Date;
   tools?: Tool[];
+  /** Separate history per surface: "telegram" (default) or "web". */
+  channel?: string;
 }
 
 /** One user message in, JARVIS's reply out; history is persisted. */
 export async function chat(deps: ChatDeps, userText: string): Promise<{ text: string; toolCalls: Array<{ name: string; ok: boolean }> }> {
   const now = deps.now ?? (() => new Date());
-  const [history, memories] = await Promise.all([loadHistory(deps.sql), listMemories(deps.sql)]);
+  const channel = deps.channel ?? "telegram";
+  const [history, memories] = await Promise.all([loadHistory(deps.sql, channel), listMemories(deps.sql)]);
   const res = await runAgent({
     model: deps.model,
     system: systemPrompt(now(), memories),
@@ -59,6 +62,6 @@ export async function chat(deps: ChatDeps, userText: string): Promise<{ text: st
   // Normally the last turn is the model's answer; if the step limit cut it short, record the fallback reply
   // so the stored history still alternates user → model.
   const last = res.turns[res.turns.length - 1];
-  await saveTurns(deps.sql, last?.role === "model" ? res.turns : [...res.turns, { role: "model", parts: [{ text: res.text }] }]);
+  await saveTurns(deps.sql, last?.role === "model" ? res.turns : [...res.turns, { role: "model", parts: [{ text: res.text }] }], channel);
   return { text: res.text, toolCalls: res.toolCalls };
 }
