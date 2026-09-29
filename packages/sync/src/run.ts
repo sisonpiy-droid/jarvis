@@ -40,7 +40,7 @@ export interface SyncDeps {
   sql: Sql;
   sessionKey: string;
   channel: Channel | null;
-  /** Called with newly published, unsubmitted assignments (e.g. to auto-draft them). Never blocks the sync. */
+  /** Called with open, unsubmitted assignments that still need a draft (at most one per run). Never blocks the sync. */
   onNewAssignments?: (ids: string[]) => Promise<void>;
   /** Private Google Calendar iCal URL; when set, each run also syncs the calendar. */
   icsUrl?: string | null;
@@ -178,10 +178,12 @@ export async function runMesaSync(deps: SyncDeps, opts: SyncOptions): Promise<Sy
 
     const sent = opts.send !== false && deps.channel ? await dispatchNotifications(sql, deps.channel, log) : 0;
 
-    // New work → optional auto-draft. Files first would be nicer, but the drafter reads whatever is already downloaded.
-    const fresh = cs.changeSet.events.filter((e) => e.type === "assignment.created").map((e) => e.sourceId!);
-    const pending = snap.assignments.filter((a) => fresh.includes(a.sourceId) && a.submissionStatus === "not_submitted" && (!a.dueAt || Date.parse(a.dueAt) > now.getTime()));
-    if (pending.length && deps.onNewAssignments) await deps.onNewAssignments(pending.map((a) => a.sourceId)).catch((err) => log.warn("auto-draft trigger failed", { error: err }));
+    // Drafting backlog: every open, unsubmitted assignment gets a draft — newest deadline first, one per run
+    // (keeps within the free AI quota). New assignments land here too.
+    if (deps.onNewAssignments) {
+      const next = await nextToDraft(sql, now).catch(() => []);
+      if (next.length) await deps.onNewAssignments(next).catch((err) => log.warn("auto-draft trigger failed", { error: err }));
+    }
 
     // Files last: alerts are never delayed by downloads, and a download problem never fails the sync.
     let files: FetchResult | undefined;
@@ -239,6 +241,24 @@ function sessionExpiryWarning(expiresAt: string | null, now: Date): Notification
     text: `🔑 <b>Your MESA sign-in expires ${when}</b>\n\nTo keep JARVIS watching, run this on your laptop before then:\n<code>npm run mesa:login</code>`,
     scheduledFor: deliveryTime("high", now).toISOString(),
   };
+}
+
+/**
+ * The next assignment that needs a draft: open (not submitted, deadline in the future or unset), no finished
+ * draft for its current content, no attempt in the last 20 minutes, and fewer than 2 failures for this version.
+ */
+export async function nextToDraft(sql: Sql, now: Date, limit = 1): Promise<string[]> {
+  const rows = await sql`
+    select i.source_id from jarvis.lms_items i
+     where i.kind = 'assignment' and i.removed_at is null
+       and i.data ->> 'submissionStatus' not in ('submitted', 'submitted_late')
+       and (i.sort_at is null or i.sort_at > ${now.toISOString()})
+       and not exists (select 1 from jarvis.drafts d where d.assignment_id = i.source_id and d.assignment_hash = i.content_hash and d.status = 'done')
+       and not exists (select 1 from jarvis.drafts d where d.assignment_id = i.source_id and d.created_at > ${new Date(now.getTime() - 20 * 60_000).toISOString()})
+       and (select count(*) from jarvis.drafts d where d.assignment_id = i.source_id and d.assignment_hash = i.content_hash and d.status = 'failed') < 2
+     order by i.sort_at asc nulls last
+     limit ${limit}`;
+  return rows.map((r) => String(r.source_id));
 }
 
 interface Built {

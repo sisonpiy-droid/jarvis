@@ -6,7 +6,7 @@ import { Badge, Section, StatusBadge } from "../ui";
 export default async function AssignmentsPage() {
   const all = (await assignments()).filter((a) => !a.removed);
   const now = Date.now();
-  const open = all.filter((a) => !isSubmitted(a.status) && (!a.dueAt || Date.parse(a.dueAt) > now)).sort((a, b) => (a.dueAt ?? "~").localeCompare(b.dueAt ?? "~"));
+  const open = all.filter((a) => !isSubmitted(a.status) && (!a.dueAt || Date.parse(a.dueAt) > now)).sort((a, b) => ((a.dueAt ?? "9999") < (b.dueAt ?? "9999") ? -1 : 1));
   const overdue = all.filter((a) => !isSubmitted(a.status) && a.dueAt && Date.parse(a.dueAt) <= now);
   const done = all.filter((a) => isSubmitted(a.status));
 

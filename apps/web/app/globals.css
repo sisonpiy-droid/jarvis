@@ -33,8 +33,10 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
-a {
-  color: var(--color-accent);
+@layer base {
+  a {
+    color: var(--color-accent);
+  }
 }
 
 .card {
@@ -46,3 +48,20 @@ a {
 .prose-chat b { font-weight: 600; }
 .prose-chat code { font-family: ui-monospace, Consolas, monospace; font-size: 0.9em; background: color-mix(in srgb, var(--color-line) 60%, transparent); padding: 0 0.25em; border-radius: 4px; }
 .prose-chat pre { white-space: pre-wrap; background: color-mix(in srgb, var(--color-line) 60%, transparent); padding: 0.6em; border-radius: 8px; }
+
+.draft { line-height: 1.7; font-size: 0.95rem; }
+.draft h2 { font-size: 1.35rem; font-weight: 600; margin: 0 0 0.8rem; }
+.draft h3 { font-size: 1.1rem; font-weight: 600; margin: 1.6rem 0 0.5rem; padding-top: 0.8rem; border-top: 1px solid var(--color-line); }
+.draft h4 { font-size: 1rem; font-weight: 600; margin: 1.2rem 0 0.4rem; }
+.draft p { margin: 0.5rem 0; }
+.draft ul, .draft ol { margin: 0.4rem 0 0.8rem 1.3rem; }
+.draft ul { list-style: disc; }
+.draft ol { list-style: decimal; }
+.draft li { margin: 0.15rem 0; }
+.draft blockquote { border-left: 3px solid var(--color-line); padding-left: 0.8rem; color: var(--color-muted); margin: 0.6rem 0; }
+.draft code { font-family: ui-monospace, Consolas, monospace; font-size: 0.88em; background: color-mix(in srgb, var(--color-line) 60%, transparent); padding: 0 0.25em; border-radius: 4px; }
+.draft hr { border: 0; border-top: 1px solid var(--color-line); margin: 1.2rem 0; }
+.draft .md-table { overflow-x: auto; margin: 0.8rem 0; }
+.draft table { border-collapse: collapse; width: 100%; font-size: 0.88rem; }
+.draft th, .draft td { border: 1px solid var(--color-line); padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
+.draft th { background: color-mix(in srgb, var(--color-line) 50%, transparent); font-weight: 600; }

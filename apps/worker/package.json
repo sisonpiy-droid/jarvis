@@ -10,7 +10,8 @@
     "db:migrate": "tsx src/db-migrate.ts",
     "sync:mesa": "tsx src/sync-mesa.ts",
     "deploy:cloud": "tsx src/deploy-cloud.ts",
-    "draft": "tsx src/draft-assignment.ts"
+    "draft": "tsx src/draft-assignment.ts",
+    "draft:all": "tsx src/draft-all.ts"
   },
   "dependencies": {
     "@jarvis/db": "*",

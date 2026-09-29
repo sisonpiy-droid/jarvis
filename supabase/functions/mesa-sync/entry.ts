@@ -44,6 +44,7 @@ async function sync(trigger: "schedule" | "manual", force?: "full" | "light") {
         // Auto-draft new assignments unless AUTO_DRAFT=off (and only when an AI key is configured).
         ...(Deno.env.get("GEMINI_API_KEY") && Deno.env.get("AUTO_DRAFT") !== "off"
           ? {
+              // Drafts the backlog one assignment per run (see nextToDraft).
               onNewAssignments: async (ids: string[]) => {
                 for (const assignmentId of ids) {
                   await fetch(`${env("SUPABASE_URL")}/functions/v1/assignment-draft`, {

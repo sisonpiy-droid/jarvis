@@ -214,7 +214,7 @@ export async function draftAssignment(deps: DraftDeps, assignmentId: string, tri
     await deps.storage.upload(path, docx, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     const summary = summarize(md);
     await sql`
-      update jarvis.drafts set status = 'done', finished_at = now(), storage_path = ${path}, summary = ${summary},
+      update jarvis.drafts set status = 'done', finished_at = now(), storage_path = ${path}, summary = ${summary}, markdown = ${md},
              sources = ${sql.json(used_sources as never)} where id = ${draftId}`;
 
     await deps.sendMessage(

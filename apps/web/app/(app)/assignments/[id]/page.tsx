@@ -46,7 +46,12 @@ export default async function AssignmentPage({ params }: { params: Promise<{ id:
                   <span className="text-[var(--color-muted)]">
                     {fmtDateTime(dr.at)} · {dr.trigger === "auto" ? "automatic" : "requested"}
                   </span>
-                  {dr.status === "done" && <a href={`/drafts/${dr.id}`}>Download .docx</a>}
+                  {dr.status === "done" && (
+                    <>
+                      <a href={`/drafts/${dr.id}`}>Read</a>
+                      <a href={`/api/drafts/${dr.id}/docx`}>Download .docx</a>
+                    </>
+                  )}
                 </div>
                 {dr.error && <p className="mt-1 text-[var(--color-bad)]">{dr.error}</p>}
                 {dr.summary && <p className="mt-1 whitespace-pre-line text-[var(--color-muted)]">{summarize(dr.summary, 600)}</p>}
