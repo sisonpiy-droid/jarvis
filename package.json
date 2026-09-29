@@ -22,7 +22,7 @@
     "setup:db": "npm run -s -w @jarvis/worker setup:db",
     "db:migrate": "npm run -s -w @jarvis/worker db:migrate",
     "sync:mesa": "npm run -s -w @jarvis/worker sync:mesa --",
-    "edge:build": "esbuild supabase/functions/mesa-sync/entry.ts --bundle --format=esm --platform=neutral --target=es2022 --main-fields=module,main --conditions=import --alias:postgres=npm:postgres@3.4.9 --external:npm:* --external:node:* --legal-comments=none --outfile=supabase/functions/mesa-sync/index.js",
+    "edge:build": "esbuild supabase/functions/mesa-sync/entry.ts --bundle --format=esm --platform=neutral --target=es2022 --main-fields=module,main --conditions=import --alias:postgres=npm:postgres@3.4.9 --external:npm:* --external:node:* --legal-comments=none --outfile=supabase/functions/mesa-sync/index.js && esbuild supabase/functions/telegram-bot/entry.ts --bundle --format=esm --platform=neutral --target=es2022 --main-fields=module,main --conditions=import --alias:postgres=npm:postgres@3.4.9 --external:npm:* --external:node:* --legal-comments=none --outfile=supabase/functions/telegram-bot/index.js",
     "deploy:cloud": "npm run -s -w @jarvis/worker deploy:cloud"
   },
   "dependencies": {

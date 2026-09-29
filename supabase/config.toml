@@ -6,3 +6,8 @@ project_id = "jarvis"
 verify_jwt = false
 # Pre-bundled by `npm run edge:build` from packages/* (see entry.ts).
 entrypoint = "./functions/mesa-sync/index.js"
+
+[functions.telegram-bot]
+# Telegram authenticates with the webhook secret header (checked in code).
+verify_jwt = false
+entrypoint = "./functions/telegram-bot/index.js"

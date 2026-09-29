@@ -8,6 +8,7 @@ import { loadEnv, repoRoot } from "@jarvis/shared";
 //   1. bundle the Edge Function        3. deploy it
 //   2. upload its secrets              4. schedule it every 5 min with pg_cron
 //   5. call it once and show the result
+//   6. deploy the Telegram bot and point Telegram's webhook at it
 // Needs SUPABASE_ACCESS_TOKEN in .env (supabase.com/dashboard/account/tokens).
 
 loadEnv();
@@ -37,8 +38,10 @@ const secretsDir = join(root, ".secrets");
 mkdirSync(secretsDir, { recursive: true });
 const secretsFile = join(secretsDir, "edge.env");
 try {
-  const keys = ["MESA_SESSION_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "CRON_SECRET"];
-  writeFileSync(secretsFile, keys.map((k) => `${k}=${need(k)}`).join("\n") + "\n", { mode: 0o600 });
+  const keys = ["MESA_SESSION_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "CRON_SECRET", "TELEGRAM_WEBHOOK_SECRET"];
+  const optional = ["GEMINI_API_KEY", "GEMINI_MODEL"].filter((k) => process.env[k]);
+  writeFileSync(secretsFile, [...keys.map((k) => `${k}=${need(k)}`), ...optional.map((k) => `${k}=${process.env[k]}`)].join("\n") + "\n", { mode: 0o600 });
+  if (!optional.includes("GEMINI_API_KEY")) console.log("   (no GEMINI_API_KEY yet — chat will answer quick commands only)");
   run(["secrets", "set", "--project-ref", ref, "--env-file", secretsFile]);
 } finally {
   rmSync(secretsFile, { force: true });
@@ -74,4 +77,31 @@ const res = await fetch(`https://${ref}.supabase.co/functions/v1/mesa-sync?wait&
   headers: { Authorization: `Bearer ${need("CRON_SECRET")}` },
 });
 console.log(`HTTP ${res.status}`, await res.text());
-console.log(`\nDone. JARVIS now checks MESA on schedule "${EVERY}" — your laptop can be off.`);
+console.log("6/6 deploying telegram-bot and registering the webhook…");
+run(["functions", "deploy", "telegram-bot", "--project-ref", ref, "--use-api", "--no-verify-jwt"]);
+const hook = await fetch(`https://api.telegram.org/bot${need("TELEGRAM_BOT_TOKEN")}/setWebhook`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    url: `https://${ref}.supabase.co/functions/v1/telegram-bot`,
+    secret_token: need("TELEGRAM_WEBHOOK_SECRET"),
+    allowed_updates: ["message"],
+    drop_pending_updates: true,
+  }),
+}).then((r) => r.json() as Promise<{ ok: boolean; description?: string }>);
+console.log(`Telegram webhook: ${hook.ok ? "set" : `FAILED ${hook.description}`}`);
+const commands = [
+  ["due", "What's due in the next 7 days"],
+  ["today", "Today's classes"],
+  ["tomorrow", "Tomorrow's classes"],
+  ["status", "Sync health and sign-in expiry"],
+  ["sync", "Check the LMS right now"],
+  ["help", "What JARVIS can do"],
+].map(([command, description]) => ({ command, description }));
+await fetch(`https://api.telegram.org/bot${need("TELEGRAM_BOT_TOKEN")}/setMyCommands`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ commands }),
+});
+
+console.log(`\nDone. JARVIS now checks MESA on schedule "${EVERY}" and answers you on Telegram — your laptop can be off.`);

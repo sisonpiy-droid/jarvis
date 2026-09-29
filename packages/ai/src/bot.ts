@@ -1,0 +1,138 @@
+import type { Sql } from "@jarvis/db";
+import type { ModelProvider } from "./gemini";
+import { chat } from "./jarvis";
+import { markdownToTelegramHtml, splitForTelegram } from "./telegram-format";
+import { jarvisTools } from "./tools";
+
+// Telegram front door. Only the owner's chat is served; every other sender is
+// ignored. Slash commands answer straight from the database (no AI needed);
+// anything else goes to the JARVIS agent.
+
+export interface TelegramUpdate {
+  update_id: number;
+  message?: { message_id: number; chat: { id: number | string }; text?: string };
+}
+
+export interface BotDeps {
+  sql: Sql;
+  token: string;
+  ownerChatId: string;
+  model: ModelProvider | null;
+  /** Kicks off an immediate LMS sync (fire-and-forget). */
+  triggerSync?: () => Promise<void>;
+  fetch?: typeof fetch;
+  now?: () => Date;
+}
+
+const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+export const HELP = [
+  "🤖 <b>JARVIS</b> — your MESA chief of staff",
+  "",
+  "<b>Quick commands</b>",
+  "/due — what's due in the next 7 days",
+  "/today — today's classes",
+  "/tomorrow — tomorrow's classes",
+  "/status — sync health and sign-in expiry",
+  "/sync — check the LMS right now",
+  "",
+  "<b>Or just ask</b>, e.g.",
+  "• What's due this week?",
+  "• Explain the Lenskart workbook assignment",
+  "• Find the slides on unit economics",
+  "• Remind me at 9 pm to finish the case",
+].join("\n");
+
+async function telegram(deps: BotDeps, method: string, body: Record<string, unknown>) {
+  const res = await (deps.fetch ?? fetch)(`https://api.telegram.org/bot${deps.token}/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string };
+  if (!json.ok) throw new Error(`Telegram ${method} failed: ${json.description ?? res.status}`);
+}
+
+export async function reply(deps: BotDeps, html: string) {
+  for (const chunk of splitForTelegram(html)) {
+    try {
+      await telegram(deps, "sendMessage", { chat_id: deps.ownerChatId, text: chunk, parse_mode: "HTML", link_preview_options: { is_disabled: true } });
+    } catch {
+      // Malformed HTML from the model: fall back to plain text rather than dropping the reply.
+      await telegram(deps, "sendMessage", { chat_id: deps.ownerChatId, text: chunk.replace(/<[^>]+>/g, "") });
+    }
+  }
+}
+
+export async function commandReply(deps: BotDeps, cmd: string): Promise<string | null> {
+  const tools = new Map(jarvisTools(deps.sql, deps.now).map((t) => [t.name, t]));
+  switch (cmd) {
+    case "/start":
+    case "/help":
+      return HELP;
+    case "/due": {
+      const rows = (await tools.get("get_upcoming_assignments")!.run({ days: 7 })) as Array<Record<string, unknown>>;
+      if (!rows.length) return "📌 Nothing unsubmitted is due in the next 7 days. ✅";
+      return [
+        `📌 <b>Not submitted — next 7 days (${rows.length})</b>`,
+        ...rows.map((r) => `• ${r.overdue ? "⚠️ <b>OVERDUE</b> " : ""}${esc(r.due)} — <a href="${esc(r.url)}">${esc(r.title)}</a>${r.course ? ` <i>(${esc(String(r.course).replace(/\s+with\s+.*$/i, ""))})</i>` : ""}`),
+      ].join("\n");
+    }
+    case "/today":
+    case "/tomorrow": {
+      const rows = (await tools.get("get_schedule")!.run({ date: cmd.slice(1) })) as Array<Record<string, unknown>>;
+      if (!rows.length) return `🏫 No classes ${cmd.slice(1)}.`;
+      return [
+        `🏫 <b>${cmd === "/today" ? "Today" : "Tomorrow"} (${rows.length})</b>`,
+        ...rows.map((r) => `• ${esc(String(r.when).replace(/^.*?,\s*\d+\s+\w+\s+\d{4},\s*/, ""))} — ${esc(r.course ?? r.title)}${r.course && r.title !== r.course ? `: ${esc(r.title)}` : ""}${r.room ? ` <i>(${esc(r.room)})</i>` : ""}${r.status === "cancelled" ? " ❌ cancelled" : ""}`),
+      ].join("\n");
+    }
+    case "/status": {
+      const s = (await tools.get("get_status")!.run({})) as Record<string, Record<string, unknown> | number | undefined>;
+      const run = s.last_sync as Record<string, unknown> | undefined;
+      const mesa = s.mesa as Record<string, unknown> | undefined;
+      const files = (s.files ?? {}) as Record<string, number>;
+      return [
+        "🩺 <b>JARVIS status</b>",
+        `Last check: ${esc(run?.at)} — ${esc(run?.status)}${run?.error ? ` (${esc(run.error)})` : ""}`,
+        `Last full scan: ${esc(mesa?.last_full_scan)}`,
+        `MESA sign-in: ${esc(mesa?.status)}, expires ${esc(mesa?.sign_in_expires)}`,
+        `Files: ${files.done ?? 0} downloaded, ${files.pending ?? 0} pending${files.failed ? `, ${files.failed} failed` : ""}`,
+        `Notifications queued: ${esc(s.queued_notifications)}`,
+      ].join("\n");
+    }
+    case "/sync":
+      if (!deps.triggerSync) return "Sync trigger isn't configured.";
+      await deps.triggerSync();
+      return "🔄 Checking the LMS now — you'll get a message if anything changed.";
+    default:
+      return null;
+  }
+}
+
+/** Handles one Telegram update. Exactly-once: the update id is recorded before any work. */
+export async function handleUpdate(deps: BotDeps, update: TelegramUpdate): Promise<void> {
+  const msg = update.message;
+  if (!msg?.text || String(msg.chat.id) !== deps.ownerChatId) return; // not the owner: ignore silently
+  const fresh = await deps.sql`insert into jarvis.telegram_updates (update_id) values (${update.update_id}) on conflict do nothing returning update_id`;
+  if (!fresh.length) return; // Telegram retry of something already handled
+
+  const text = msg.text.trim();
+  const cmd = text.startsWith("/") ? text.split(/[\s@]/)[0]!.toLowerCase() : null;
+  try {
+    if (cmd) {
+      const out = await commandReply(deps, cmd);
+      await reply(deps, out ?? `Unknown command. ${HELP}`);
+      return;
+    }
+    if (!deps.model) {
+      await reply(deps, "💬 Chat isn't switched on yet (no AI key). Quick commands work: /due /today /status /sync");
+      return;
+    }
+    await telegram(deps, "sendChatAction", { chat_id: deps.ownerChatId, action: "typing" }).catch(() => {});
+    const res = await chat({ sql: deps.sql, model: deps.model, ...(deps.now ? { now: deps.now } : {}) }, text);
+    await reply(deps, markdownToTelegramHtml(res.text));
+  } catch (err) {
+    await reply(deps, `⚠️ Something went wrong: ${esc(err instanceof Error ? err.message : String(err)).slice(0, 300)}`).catch(() => {});
+  }
+}
