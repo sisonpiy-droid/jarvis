@@ -14,13 +14,13 @@ possible, and doc updates.
 | 5 | Telegram notifications | ✅ 2026-09-29 | Bot, dedupe keys, quiet hours, batching, deadline reminders (T-72h/24h/3h), "session expiring" alert |
 | 6 | Dashboard | ✅ 2026-09-29 (Vercel, Telegram magic-link login) | Next.js: Today / Assignments / Classes / Sync-runs debug page, behind Supabase Auth |
 | 7 | JARVIS chat + tools | ✅ 2026-09-29 (Telegram, Gemini free tier) | Provider-agnostic LLM layer; read tools over the DB; `create_task` / `create_reminder`; chat answers "what's due this week?" from real data |
-| 8 | Gmail + Calendar | 🟡 Calendar ✅ (personal Google Calendar via private iCal feed). Gmail ⏳ needs a Google OAuth app | OAuth, read-only sync, classification, draft replies (approval-gated send) |
+| 8 | Gmail + Calendar | 🟡 Calendar ✅ (personal Google Calendar via private iCal feed). Gmail ⏸ deferred by choice (most communication is on the LMS) | OAuth, read-only sync, classification, draft replies (approval-gated send) |
 | 9 | Assignment intelligence | ✅ 2026-09-29 (drafts → .docx on Telegram; auto for new work, /draft on request) | Brief parsing (PDF/DOCX/PPTX/XLSX), requirement extraction, material retrieval, draft deliverables, checks against the original |
 | 10 | 24/7 orchestration | 🟡 monitoring live on Supabase (pg_cron → Edge Function, every 5 min, ₹0) | Daily brief, health page |
 
 ## Current state (2026-09-29)
 
-Live in Supabase: `mesa-sync` (cron, 5 min; files; 8 am brief), `telegram-bot` (owner-only chat + commands), `assignment-draft` (reads the original brief/attachments + ranked class material, drafts with Gemini, delivers a .docx; never submits). Also live: long-term memory (/memory), web dashboard (https://jarvis-dashboard-ashy-seven.vercel.app), personal Google Calendar. Remaining: Gmail (OAuth).
+Live in Supabase: `mesa-sync` (cron, 5 min; files; 8 am brief), `telegram-bot` (owner-only chat + commands), `assignment-draft` (reads the original brief/attachments + ranked class material, drafts with Gemini, delivers a .docx; never submits). Also live: long-term memory (/memory), web dashboard (https://jarvis-dashboard-ashy-seven.vercel.app), personal Google Calendar. Gmail deferred by choice.
 
 Monitoring runs in the cloud: pg_cron calls the `mesa-sync` Edge Function every 5 minutes (light check, ~3 GETs); a full scan runs when the last one is >6 h old. Next up: file downloads to Storage (Phase 4 remainder), then the dashboard (Phase 6) and chat (Phase 7, Gemini free tier).
 
