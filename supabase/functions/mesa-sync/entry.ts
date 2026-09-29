@@ -40,6 +40,20 @@ async function sync(trigger: "schedule" | "manual", force?: "full" | "light") {
         // Both provided to Edge Functions by the platform.
         storage: new SupabaseStorage(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY")),
         log,
+        // Auto-draft new assignments unless AUTO_DRAFT=off (and only when an AI key is configured).
+        ...(Deno.env.get("GEMINI_API_KEY") && Deno.env.get("AUTO_DRAFT") !== "off"
+          ? {
+              onNewAssignments: async (ids: string[]) => {
+                for (const assignmentId of ids) {
+                  await fetch(`${env("SUPABASE_URL")}/functions/v1/assignment-draft`, {
+                    method: "POST",
+                    headers: { Authorization: `Bearer ${env("CRON_SECRET")}`, "Content-Type": "application/json" },
+                    body: JSON.stringify({ assignmentId, trigger: "auto" }),
+                  });
+                }
+              },
+            }
+          : {}),
       },
       { trigger, ...(force ? { force } : {}) },
     );

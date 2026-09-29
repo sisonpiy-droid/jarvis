@@ -2,7 +2,7 @@ import type { Sql } from "@jarvis/db";
 import type { ModelProvider } from "./gemini";
 import { chat } from "./jarvis";
 import { markdownToTelegramHtml, splitForTelegram } from "./telegram-format";
-import { jarvisTools } from "./tools";
+import { jarvisTools, resolveAssignment } from "./tools";
 
 // Telegram front door. Only the owner's chat is served; every other sender is
 // ignored. Slash commands answer straight from the database (no AI needed);
@@ -20,6 +20,8 @@ export interface BotDeps {
   model: ModelProvider | null;
   /** Kicks off an immediate LMS sync (fire-and-forget). */
   triggerSync?: () => Promise<void>;
+  /** Starts drafting an assignment (fire-and-forget; the draft arrives on Telegram). */
+  requestDraft?: (assignmentId: string) => Promise<void>;
   fetch?: typeof fetch;
   now?: () => Date;
 }
@@ -35,12 +37,14 @@ export const HELP = [
   "/tomorrow — tomorrow's classes",
   "/status — sync health and sign-in expiry",
   "/sync — check the LMS right now",
+  "/draft &lt;assignment&gt; — write a first draft (Word doc)",
   "",
   "<b>Or just ask</b>, e.g.",
   "• What's due this week?",
   "• Explain the Lenskart workbook assignment",
   "• Find the slides on unit economics",
   "• Remind me at 9 pm to finish the case",
+  "• Draft the Finance end-term assignment",
 ].join("\n");
 
 async function telegram(deps: BotDeps, method: string, body: Record<string, unknown>) {
@@ -64,9 +68,18 @@ export async function reply(deps: BotDeps, html: string) {
   }
 }
 
-export async function commandReply(deps: BotDeps, cmd: string): Promise<string | null> {
+export async function commandReply(deps: BotDeps, cmd: string, arg = ""): Promise<string | null> {
   const tools = new Map(jarvisTools(deps.sql, deps.now).map((t) => [t.name, t]));
   switch (cmd) {
+    case "/draft": {
+      if (!deps.requestDraft) return "Drafting isn't configured yet.";
+      if (!arg) return "Which one? e.g. <code>/draft Finance end term</code>";
+      const r = await resolveAssignment(deps.sql, arg, deps.now?.() ?? new Date());
+      if ("none" in r) return `No assignment matches “${esc(arg)}”. Try /due to see names.`;
+      if ("candidates" in r) return ["Several match — be more specific:", ...r.candidates.map((c) => `• ${esc(c.title)} — ${esc(c.due)} (${esc(c.status)})`)].join("\n");
+      await deps.requestDraft(String(r.one.sourceId));
+      return `✍️ Drafting <b>${esc(r.one.title)}</b> — reading the brief, attachments and class slides. The Word doc arrives here in 1–3 minutes.`;
+    }
     case "/start":
     case "/help":
       return HELP;
@@ -121,7 +134,7 @@ export async function handleUpdate(deps: BotDeps, update: TelegramUpdate): Promi
   const cmd = text.startsWith("/") ? text.split(/[\s@]/)[0]!.toLowerCase() : null;
   try {
     if (cmd) {
-      const out = await commandReply(deps, cmd);
+      const out = await commandReply(deps, cmd, text.slice(text.split(/\s/)[0]!.length).trim());
       await reply(deps, out ?? `Unknown command. ${HELP}`);
       return;
     }
@@ -130,7 +143,10 @@ export async function handleUpdate(deps: BotDeps, update: TelegramUpdate): Promi
       return;
     }
     await telegram(deps, "sendChatAction", { chat_id: deps.ownerChatId, action: "typing" }).catch(() => {});
-    const res = await chat({ sql: deps.sql, model: deps.model, ...(deps.now ? { now: deps.now } : {}) }, text);
+    const res = await chat(
+      { sql: deps.sql, model: deps.model, ...(deps.now ? { now: deps.now } : {}), tools: jarvisTools(deps.sql, deps.now, deps.requestDraft ? { requestDraft: deps.requestDraft } : {}) },
+      text,
+    );
     await reply(deps, markdownToTelegramHtml(res.text));
   } catch (err) {
     await reply(deps, `⚠️ Something went wrong: ${esc(err instanceof Error ? err.message : String(err)).slice(0, 300)}`).catch(() => {});

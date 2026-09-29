@@ -39,7 +39,7 @@ mkdirSync(secretsDir, { recursive: true });
 const secretsFile = join(secretsDir, "edge.env");
 try {
   const keys = ["MESA_SESSION_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "CRON_SECRET", "TELEGRAM_WEBHOOK_SECRET"];
-  const optional = ["GEMINI_API_KEY", "GEMINI_MODEL"].filter((k) => process.env[k]);
+  const optional = ["GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_DRAFT_MODEL", "AUTO_DRAFT"].filter((k) => process.env[k]);
   writeFileSync(secretsFile, [...keys.map((k) => `${k}=${need(k)}`), ...optional.map((k) => `${k}=${process.env[k]}`)].join("\n") + "\n", { mode: 0o600 });
   if (!optional.includes("GEMINI_API_KEY")) console.log("   (no GEMINI_API_KEY yet — chat will answer quick commands only)");
   run(["secrets", "set", "--project-ref", ref, "--env-file", secretsFile]);
@@ -79,6 +79,7 @@ const res = await fetch(`https://${ref}.supabase.co/functions/v1/mesa-sync?wait&
 console.log(`HTTP ${res.status}`, await res.text());
 console.log("6/6 deploying telegram-bot and registering the webhook…");
 run(["functions", "deploy", "telegram-bot", "--project-ref", ref, "--use-api", "--no-verify-jwt"]);
+run(["functions", "deploy", "assignment-draft", "--project-ref", ref, "--use-api", "--no-verify-jwt"]);
 const hook = await fetch(`https://api.telegram.org/bot${need("TELEGRAM_BOT_TOKEN")}/setWebhook`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
@@ -96,6 +97,7 @@ const commands = [
   ["tomorrow", "Tomorrow's classes"],
   ["status", "Sync health and sign-in expiry"],
   ["sync", "Check the LMS right now"],
+  ["draft", "Draft an assignment (Word doc)"],
   ["help", "What JARVIS can do"],
 ].map(([command, description]) => ({ command, description }));
 await fetch(`https://api.telegram.org/bot${need("TELEGRAM_BOT_TOKEN")}/setMyCommands`, {

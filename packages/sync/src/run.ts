@@ -39,6 +39,8 @@ export interface SyncDeps {
   sql: Sql;
   sessionKey: string;
   channel: Channel | null;
+  /** Called with newly published, unsubmitted assignments (e.g. to auto-draft them). Never blocks the sync. */
+  onNewAssignments?: (ids: string[]) => Promise<void>;
   /** When set, each run also downloads a few pending LMS files into Storage. */
   storage?: BlobStorage | null;
   log: Logger;
@@ -169,6 +171,11 @@ export async function runMesaSync(deps: SyncDeps, opts: SyncOptions): Promise<Sy
     if (brief) await db.enqueueNotifications(sql, [brief]);
 
     const sent = opts.send !== false && deps.channel ? await dispatchNotifications(sql, deps.channel, log) : 0;
+
+    // New work → optional auto-draft. Files first would be nicer, but the drafter reads whatever is already downloaded.
+    const fresh = cs.changeSet.events.filter((e) => e.type === "assignment.created").map((e) => e.sourceId!);
+    const pending = snap.assignments.filter((a) => fresh.includes(a.sourceId) && a.submissionStatus === "not_submitted" && (!a.dueAt || Date.parse(a.dueAt) > now.getTime()));
+    if (pending.length && deps.onNewAssignments) await deps.onNewAssignments(pending.map((a) => a.sourceId)).catch((err) => log.warn("auto-draft trigger failed", { error: err }));
 
     // Files last: alerts are never delayed by downloads, and a download problem never fails the sync.
     let files: FetchResult | undefined;

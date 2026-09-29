@@ -1,0 +1,14 @@
+{
+  "name": "@jarvis/assist",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "dependencies": {
+    "@jarvis/ai": "*",
+    "@jarvis/db": "*",
+    "@jarvis/files": "*",
+    "@jarvis/shared": "*",
+    "fflate": "*"
+  }
+}

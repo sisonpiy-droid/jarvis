@@ -36,6 +36,13 @@ async function processUpdate(update: TelegramUpdate) {
         triggerSync: async () => {
           await fetch(syncUrl, { method: "POST", headers: { Authorization: `Bearer ${env("CRON_SECRET")}` } });
         },
+        requestDraft: async (assignmentId) => {
+          await fetch(`${env("SUPABASE_URL")}/functions/v1/assignment-draft`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${env("CRON_SECRET")}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ assignmentId, trigger: "request" }),
+          });
+        },
       },
       update,
     );

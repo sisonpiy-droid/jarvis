@@ -11,3 +11,8 @@ entrypoint = "./functions/mesa-sync/index.js"
 # Telegram authenticates with the webhook secret header (checked in code).
 verify_jwt = false
 entrypoint = "./functions/telegram-bot/index.js"
+
+[functions.assignment-draft]
+# Called by mesa-sync / telegram-bot with the shared secret (checked in code).
+verify_jwt = false
+entrypoint = "./functions/assignment-draft/index.js"

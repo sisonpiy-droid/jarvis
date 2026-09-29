@@ -9,7 +9,8 @@
     "setup:db": "tsx src/setup-db.ts",
     "db:migrate": "tsx src/db-migrate.ts",
     "sync:mesa": "tsx src/sync-mesa.ts",
-    "deploy:cloud": "tsx src/deploy-cloud.ts"
+    "deploy:cloud": "tsx src/deploy-cloud.ts",
+    "draft": "tsx src/draft-assignment.ts"
   },
   "dependencies": {
     "@jarvis/db": "*",
@@ -17,6 +18,9 @@
     "@jarvis/notify": "*",
     "@jarvis/shared": "*",
     "@jarvis/sync": "*",
-    "postgres": "*"
+    "postgres": "*",
+    "@jarvis/ai": "*",
+    "@jarvis/assist": "*",
+    "@jarvis/files": "*"
   }
 }

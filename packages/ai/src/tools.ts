@@ -14,6 +14,11 @@ const clampInt = (v: unknown, lo: number, hi: number, dflt: number) => {
 };
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 const like = (q: string) => `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
+/** Every word must appear somewhere in the title (order and punctuation don't matter). */
+const titleWords = (q: string) => {
+  const w = q.split(/[\s:,–—-]+/).filter((x) => x.length > 1);
+  return (w.length ? w : [q]).map(like);
+};
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: "object", properties, required });
 
@@ -32,8 +37,30 @@ export function istRange(date: string, days: number, now: Date): { from: string;
   return { from: new Date(start).toISOString(), to: new Date(start + days * 86_400_000).toISOString() };
 }
 
-export function jarvisTools(sql: Sql, now: () => Date = () => new Date()): Tool[] {
-  return [
+export type Resolved = { one: Record<string, unknown> } | { candidates: Array<Record<string, unknown>> } | { none: true };
+
+/** Finds the assignment a user means: by id, else by title words, preferring upcoming unsubmitted work. */
+export async function resolveAssignment(sql: Sql, query: string, now: Date = new Date()): Promise<Resolved> {
+  const q = query.trim();
+  if (!q) return { none: true };
+  const rows = UUID.test(q)
+    ? await sql`select data from jarvis.lms_items where kind = 'assignment' and source_id = ${q}`
+    : await sql`select data from jarvis.lms_items where kind = 'assignment' and removed_at is null and title ilike all(${titleWords(q)}) order by sort_at desc limit 8`;
+  const all = rows.map((r) => r.data as Record<string, unknown>);
+  if (!all.length) return { none: true };
+  if (all.length === 1) return { one: all[0]! };
+  const live = all.filter((d) => !String(d.submissionStatus).startsWith("submitted") && Date.parse(String(d.dueAt)) > now.getTime());
+  if (live.length === 1) return { one: live[0]! };
+  return { candidates: all.map((d) => ({ id: d.sourceId, title: d.title, course: d.courseTitle, due: d.dueAtIst, status: d.submissionStatus })) };
+}
+
+export interface ToolOptions {
+  /** Starts drafting an assignment in the background (result arrives on Telegram). */
+  requestDraft?: (assignmentId: string) => Promise<void>;
+}
+
+export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: ToolOptions = {}): Tool[] {
+  const tools: Tool[] = [
     {
       name: "get_upcoming_assignments",
       effect: "read",
@@ -77,7 +104,7 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date()): Tool[
         if (!q) throw new Error("query is required");
         const rows = UUID.test(q)
           ? await sql`select data from jarvis.lms_items where kind = 'assignment' and source_id = ${q}`
-          : await sql`select data from jarvis.lms_items where kind = 'assignment' and removed_at is null and title ilike ${like(q)} order by sort_at desc limit 5`;
+          : await sql`select data from jarvis.lms_items where kind = 'assignment' and removed_at is null and title ilike all(${titleWords(q)}) order by sort_at desc limit 5`;
         if (!rows.length) return { found: false };
         if (rows.length > 1) return { found: "multiple", candidates: rows.map((r) => ({ id: r.data.sourceId, title: r.data.title, course: r.data.courseTitle, due: r.data.dueAtIst, status: r.data.submissionStatus })), hint: "Ask which one, or pick the upcoming unsubmitted one if the user clearly means that." };
         const d = rows[0]!.data as Record<string, unknown>;
@@ -253,4 +280,22 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date()): Tool[
       },
     },
   ];
+  if (opts.requestDraft) {
+    const requestDraft = opts.requestDraft;
+    tools.push({
+      name: "draft_assignment",
+      effect: "write-local",
+      description:
+        "Start writing a full first draft of an assignment (reads the original brief, attachments and class slides). The Word document arrives on Telegram in 1–3 minutes. Use when the user asks you to do, draft, write or solve an assignment.",
+      parameters: obj({ query: { type: "string", description: "Assignment id or words from its title" } }, ["query"]),
+      async run(a) {
+        const r = await resolveAssignment(sql, str(a.query), now());
+        if ("none" in r) return { started: false, reason: "no matching assignment" };
+        if ("candidates" in r) return { started: false, reason: "several match — ask which one", candidates: r.candidates };
+        await requestDraft(String(r.one.sourceId));
+        return { started: true, assignment: r.one.title, note: "The draft will arrive as a Word document on Telegram in 1–3 minutes." };
+      },
+    });
+  }
+  return tools;
 }
