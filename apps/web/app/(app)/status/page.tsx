@@ -1,9 +1,11 @@
 import { status } from "@/lib/queries";
 import { bytes, fmtDateTime, relative } from "@/lib/format";
+import { calendarFeedUrl } from "@/lib/auth";
 import { Badge, Section } from "../ui";
+import { CopyLink } from "./copy-link";
 
 export default async function StatusPage() {
-  const s = await status();
+  const [s, feed] = await Promise.all([status(), calendarFeedUrl()]);
   const tone = (st: string) => (st === "success" || st === "sent" ? "good" : st === "partial" || st === "queued" || st === "skipped" ? "warn" : st === "failed" ? "bad" : "muted");
   return (
     <main>
@@ -28,6 +30,18 @@ export default async function StatusPage() {
           </dd>
         </dl>
         {s.integ?.error && <p className="mt-2 text-sm text-[var(--color-bad)]">Last error: {s.integ.error}</p>}
+      </Section>
+
+      <Section title="Classes in Google Calendar">
+        <p className="mb-2 text-sm text-[var(--color-muted)]">A private feed of your MESA classes. Keep this link to yourself: anyone with it can see your timetable.</p>
+        <CopyLink url={feed} />
+        <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm">
+          <li>
+            On a computer, open <a href="https://calendar.google.com/calendar/u/0/r/settings/addbyurl">Google Calendar → Add calendar → From URL</a> (use your personal account).
+          </li>
+          <li>Paste the link and click <b>Add calendar</b>. "MESA classes" appears in your calendar list, on your phone too.</li>
+          <li>Google re-reads it every few hours, so new, moved and cancelled classes show up by themselves.</li>
+        </ol>
       </Section>
 
       <Section title="Recent syncs">

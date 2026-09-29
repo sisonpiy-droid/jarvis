@@ -64,3 +64,4 @@ export async function readCalendar(icsUrl: string, now: Date, opts: { pastDays?:
   if (!text.startsWith("BEGIN:VCALENDAR")) throw new Error("Calendar feed did not return iCalendar data");
   return { events: eventsBetween(text, from, to).map(normalizeInstance), window: { from: new Date(from).toISOString(), to: new Date(to).toISOString() } };
 }
+export * from "./feed";

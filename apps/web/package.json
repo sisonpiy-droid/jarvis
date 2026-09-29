@@ -19,7 +19,8 @@
     "react-dom": "^19.3.0",
     "server-only": "^0.0.1",
     "@jarvis/assist": "*",
-    "@jarvis/deliver": "*"
+    "@jarvis/deliver": "*",
+    "@jarvis/calendar": "*"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",

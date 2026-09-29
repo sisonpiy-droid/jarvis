@@ -58,3 +58,12 @@ export function baseUrl(): string {
   if (process.env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
   return "http://localhost:3200";
 }
+
+/** Secret path segment for the calendar feed (Google Calendar can't send cookies). Rotates with WEB_SESSION_SECRET. */
+export async function calendarToken(): Promise<string> {
+  return (await hmac("v1:calendar-feed")).slice(0, 32);
+}
+
+export async function calendarFeedUrl(): Promise<string> {
+  return `${baseUrl()}/cal/${await calendarToken()}/mesa-classes.ics`;
+}
