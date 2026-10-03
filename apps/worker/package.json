@@ -14,7 +14,8 @@
     "draft:all": "tsx src/draft-all.ts",
     "deliver": "tsx src/deliver.ts",
     "setup:push": "tsx src/setup-push.ts",
-    "web:login-link": "tsx src/web-login-link.ts"
+    "web:login-link": "tsx src/web-login-link.ts",
+    "files:extract-pdfs": "tsx src/extract-pdfs.ts"
   },
   "dependencies": {
     "@jarvis/db": "*",

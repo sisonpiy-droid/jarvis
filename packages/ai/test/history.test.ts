@@ -307,11 +307,12 @@ describe("loadHistory / saveTurns (PGlite)", () => {
 
   it("records a fallback answer when the step limit cuts the turn short", async () => {
     const loop: Message = { role: "assistant", parts: [{ type: "tool_call", id: "gx-l-0", name: "t", args: {} }] };
-    const { model } = scripted(loop, loop, loop, loop, loop, loop);
+    const STEPS = 12; // chat()'s step limit for one answer
+    const { model } = scripted(...Array.from({ length: STEPS }, () => loop));
     const t1: Tool = { name: "t", description: "d", parameters: { type: "object" }, effect: "read", run: async () => 1 };
     const res = await chat({ sql: t.sql, model, channel: "web", tools: [t1] }, "loop");
     expect(res.text).toMatch(/more steps/);
     const rows = await t.sql`select role from jarvis.chat_messages order by id`;
-    expect(rows.map((r) => r.role)).toEqual(["user", ...Array.from({ length: 6 }, () => ["model", "tool"]).flat(), "model"]);
+    expect(rows.map((r) => r.role)).toEqual(["user", ...Array.from({ length: STEPS }, () => ["model", "tool"]).flat(), "model"]);
   });
 });

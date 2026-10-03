@@ -202,6 +202,62 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
       },
     },
     {
+      name: "query_assignments",
+      effect: "read",
+      description:
+        "Filter and COUNT across ALL MESA assignments (past and future): by course / professor / short name, submission status (open = not submitted, submitted, late = submitted late, overdue = not submitted and past due), and due-date range. Returns exact totals, a breakdown (by course, professor or status) and the matching list. Use this for any counting, comparison or 'which/how many' question instead of adding up partial lists.",
+      parameters: obj({
+        course: { type: "string", description: "Optional course words, short name (DDDM) or professor name" },
+        status: { type: "string", enum: ["all", "open", "submitted", "late", "overdue"], description: "Default all" },
+        due_from: { type: "string", description: "Optional YYYY-MM-DD (IST), inclusive" },
+        due_to: { type: "string", description: "Optional YYYY-MM-DD (IST), inclusive" },
+        group_by: { type: "string", enum: ["course", "professor", "status", "none"], description: "Breakdown to return (default course)" },
+      }),
+      async run(a) {
+        const course = str(a.course).replace(/^(prof\.?|professor|dr\.?)\s+/i, "");
+        const status = (["all", "open", "submitted", "late", "overdue"] as const).find((s) => s === a.status) ?? "all";
+        const day = (v: unknown, end: boolean) => {
+          const s = str(v);
+          if (!s) return null;
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new Error("dates must be YYYY-MM-DD");
+          return istRange(s, 1, now())[end ? "to" : "from"];
+        };
+        const from = day(a.due_from, false);
+        const to = day(a.due_to, true);
+        const t = now().toISOString();
+        const words = course ? titleWords(course) : null;
+        const rows = await sql`
+          select i.source_id, i.title, i.sort_at, i.data, c.data ->> 'instructor' as professor, c.data ->> 'shortName' as short
+            from jarvis.lms_items i
+            left join jarvis.lms_items c on c.kind = 'course' and c.source_id = i.course_id
+           where i.kind = 'assignment' and i.removed_at is null
+             ${words ? sql`and (coalesce(i.data ->> 'courseTitle', '') ilike all(${words}) or coalesce(c.data ->> 'instructor', '') ilike all(${words}) or c.data ->> 'shortName' ilike ${course})` : sql``}
+             ${from ? sql`and i.sort_at >= ${from}` : sql``}
+             ${to ? sql`and i.sort_at < ${to}` : sql``}
+           order by i.sort_at nulls last`;
+        const statusOf = (d: Record<string, unknown>, due: string | null) => {
+          const s = String(d.submissionStatus ?? "");
+          if (s === "submitted_late") return "late";
+          if (s.startsWith("submitted")) return "submitted";
+          return due && due < t ? "overdue" : "open";
+        };
+        const all = rows.map((r) => {
+          const due = r.sort_at instanceof Date ? r.sort_at.toISOString() : (r.sort_at as string | null);
+          return { id: String(r.source_id), title: String(r.title), course: (r.data.courseTitle as string | null) ?? null, professor: (r.professor as string | null) ?? (r.data.instructor as string | null) ?? null, due: (r.data.dueAtIst as string | null) ?? fmt(due), status: statusOf(r.data, due) };
+        });
+        const matched = all.filter((x) => status === "all" || x.status === status || (status === "open" && x.status === "overdue"));
+        const key = (["course", "professor", "status", "none"] as const).find((g) => g === a.group_by) ?? "course";
+        const breakdown: Record<string, number> = {};
+        if (key !== "none") for (const x of matched) breakdown[String(x[key] ?? "unknown")] = (breakdown[String(x[key] ?? "unknown")] ?? 0) + 1;
+        return {
+          total: matched.length,
+          ...(key !== "none" ? { [`by_${key}`]: Object.fromEntries(Object.entries(breakdown).sort((p, q) => q[1] - p[1])) } : {}),
+          assignments: matched.slice(0, 80),
+          ...(matched.length > 80 ? { note: `${matched.length - 80} more not listed; totals above are complete` } : {}),
+        };
+      },
+    },
+    {
       name: "get_course",
       effect: "read",
       description:
@@ -266,15 +322,28 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
     {
       name: "get_announcements",
       effect: "read",
-      description: "Recent MESA announcements (newest first), optionally filtered by words.",
-      parameters: obj({ query: { type: "string" }, limit: { type: "integer", description: "default 5, max 15" } }),
+      description:
+        "MESA announcements, newest first. Filter by look-back window (days) and by keywords — an announcement matches if it contains ANY of the keywords (e.g. ['exam','viva','deadline','postponed']). Returns the total that matched as well as the items.",
+      parameters: obj({
+        keywords: { type: "array", items: { type: "string" }, description: "Optional; matches any of them in the title or text" },
+        query: { type: "string", description: "Optional single phrase (older form of keywords)" },
+        days: { type: "integer", description: "Look-back window in days (default: no limit, max 365)" },
+        limit: { type: "integer", description: "default 10, max 30" },
+      }),
       async run(a) {
-        const q = str(a.query);
-        const limit = clampInt(a.limit, 1, 15, 5);
-        const rows = q
-          ? await sql`select data from jarvis.lms_items where kind = 'announcement' and (title ilike ${like(q)} or data ->> 'bodyText' ilike ${like(q)}) order by sort_at desc limit ${limit}`
-          : await sql`select data from jarvis.lms_items where kind = 'announcement' order by sort_at desc limit ${limit}`;
-        return rows.map(({ data: d }) => ({ title: d.title, from: d.author, course: d.courseName, posted: fmt(d.createdAt), text: short(d.bodyText, 1200), attachments: (d.attachments ?? []).map((x: { fileName?: string }) => x.fileName) }));
+        const kws = [...(Array.isArray(a.keywords) ? a.keywords : []), a.query].map(str).filter((k) => k.length > 1).slice(0, 12);
+        const limit = clampInt(a.limit, 1, 30, 10);
+        const since = a.days != null ? new Date(now().getTime() - clampInt(a.days, 1, 365, 14) * 86_400_000).toISOString() : null;
+        const rows = await sql`
+          select data, count(*) over () as total from jarvis.lms_items
+           where kind = 'announcement' and removed_at is null
+             ${since ? sql`and sort_at >= ${since}` : sql``}
+             ${kws.length ? sql`and (title ilike any(${kws.map(like)}) or coalesce(data ->> 'bodyText', '') ilike any(${kws.map(like)}))` : sql``}
+           order by sort_at desc limit ${limit}`;
+        return {
+          total: Number(rows[0]?.total ?? 0),
+          announcements: rows.map(({ data: d }) => ({ title: d.title, from: d.author, course: d.courseName, posted: fmt(d.createdAt), text: short(d.bodyText, 1200), attachments: (d.attachments ?? []).map((x: { fileName?: string }) => x.fileName) })),
+        };
       },
     },
     {

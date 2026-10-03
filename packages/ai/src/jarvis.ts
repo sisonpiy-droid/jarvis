@@ -32,6 +32,7 @@ Which tool answers what:
 - "Review my month" → get_accomplished (this_month) + get_attention + list_goals. Reviews arrive in Phase 7; report observations, not judgments.
 
 How to work:
+- Complex questions: break them into parts, decide which tools answer each part, call independent lookups together in one step, then combine. For anything counted or compared (how many, which most, which late), use query_assignments — it returns exact totals; never count from a partial list. Announcements: get_announcements with days and keywords (any-word match).
 - MESA: get_upcoming_assignments, get_assignment (read attached file text when available), get_schedule, search_lms, get_course. "Deadlines in the next N days" → get_upcoming_assignments with days=N (add get_week if they mean their own tasks too). "What has <professor> taught" / "what did we cover in <course>" → get_course (it finds a course by professor name), then summarise the classes held, recordings, workbooks and assignment cases; read an outline with read_file_text for detail. For an assignment, clarify the ask, break it into parts, suggest frameworks and a structure; the owner does and submits the work. draft_assignment does an assignment; revise_assignment applies the owner's corrections or new information about one ("our startup is Snitch", "make it shorter").
 - Tasks and projects live in JARVIS (list_tasks, create_task, update_task, list_projects, get_project, create_project, update_project, add_project_item). MESA assignments and exams already have projects and tasks, kept in sync. "Add …", "I need to …", "do X by Friday" → create_task (a dated task, not a reminder). "Done with X" → update_task status done. Confirm back exactly what you stored.
 - Goals and habits (list_goals, get_goal, create_goal, update_goal, create_habit, update_habit, log_activity): "work out 4 times a week" → create_goal (count, 4, workouts, week) with habit "Work out" on {"freq":"weekly","times":4}. "Worked out" / "read 30 pages" / "skip gym today" → log_activity. Progress and streaks come only from the tools — never estimate them. When the owner decides about a quiet goal ("keep it", "pause it", "make it 3"), use respond_to_goal. A task can count toward a goal: update_task with goal.
@@ -67,6 +68,8 @@ const closeTurns = (r: AgentResult): Message[] => {
 };
 
 const MAX_REPAIR_STEPS = 3;
+/** Tool steps for one answer: complex questions (compare courses, plan the week) need several lookups. */
+const MAX_CHAT_STEPS = 12;
 
 /**
  * One user message in, JARVIS's reply out; history is persisted. Every date, weekday and id in the answer must be
@@ -86,7 +89,7 @@ export async function chat(deps: ChatDeps, userText: string): Promise<ChatResult
   const tools = [...(deps.tools ?? jarvisTools(sql, now)), ...memoryTools(sql, now)];
   const message = userText.slice(0, 4000);
 
-  const first = await runAgent({ model: deps.model, system, history, user: [{ type: "text", text: message }], tools });
+  const first = await runAgent({ model: deps.model, system, history, user: [{ type: "text", text: message }], tools, maxSteps: MAX_CHAT_STEPS });
 
   // Evidence: tool results (this turn's and the history's), the owner's own words, and the memory ids in the prompt.
   const historyResults = history.flatMap((m) => (m.role === "tool" ? m.parts.flatMap((p) => (p.type === "tool_result" ? [p.result ?? p.error] : [])) : []));

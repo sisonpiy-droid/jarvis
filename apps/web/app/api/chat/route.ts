@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { requestDraft, requestRevision } from "@/lib/edge";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300; // multi-step answers to complex questions (deliver uses 300 too)
 
 const failed = (err: unknown) => NextResponse.json({ error: err instanceof Error ? err.message.slice(0, 200) : "Failed" }, { status: 500 });
 

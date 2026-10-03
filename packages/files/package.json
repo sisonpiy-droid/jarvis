@@ -8,6 +8,7 @@
     "@jarvis/db": "*",
     "@jarvis/mesa": "*",
     "@jarvis/shared": "*",
-    "fflate": "*"
+    "fflate": "*",
+    "unpdf": "^1.8.1"
   }
 }
