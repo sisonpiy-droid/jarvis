@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractPdfText, isPdf } from "../src/pdf-text";
+import { cleanPdfText, extractPdfText, isPdf } from "../src/pdf-text";
 
 /** A minimal one-page PDF, built with correct xref offsets; `text` null = a page with no text layer. */
 function tinyPdf(text: string | null): Uint8Array {
@@ -27,6 +27,10 @@ describe("PDF text", () => {
   it("extracts the text layer of a PDF", async () => {
     const text = await extractPdfText(tinyPdf("Session 8 pre-read: Groww unit economics and cohort retention"));
     expect(text).toContain("Groww unit economics and cohort retention");
+  });
+
+  it("drops control characters such as NUL, which Postgres can't store", () => {
+    expect(cleanPdfText("HBS\u0000 Case\u0007 —  FoF\t\tnotes\n\n\n\nend")).toBe("HBS Case — FoF notes\n\nend");
   });
 
   it("returns null for a PDF with no text layer (scanned)", async () => {
