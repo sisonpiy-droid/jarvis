@@ -32,7 +32,13 @@ export default async function ClassesPage() {
                     {c.allDay ? "All day" : `${fmtTime(c.startAt)}–${fmtTime(c.endAt)}`}
                   </span>
                   <span className="min-w-0">
-                    <b className="font-medium">{c.personal ? c.title : shortCourse(c.course ?? c.title)}</b>
+                    {!c.personal && c.type === "session" ? (
+                      <Link href={`/classes/${encodeURIComponent(c.id)}`} className="font-medium">
+                        {shortCourse(c.course ?? c.title)}
+                      </Link>
+                    ) : (
+                      <b className="font-medium">{c.personal ? c.title : shortCourse(c.course ?? c.title)}</b>
+                    )}
                     {!c.personal && c.title !== c.course && <span className="text-[var(--color-muted)]"> · {c.title}</span>}
                     {c.personal && (
                       <span className="ml-2">

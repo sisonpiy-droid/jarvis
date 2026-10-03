@@ -21,7 +21,8 @@ The full plan covers architecture, data model, phases and risks. Decisions:
 | 4 | Progress, risk and neglect engine: pace-based risk (on track / at risk / off track, first partial period prorated, habit-only capacity), neglect thresholds by period, slipping habits (`risk.ts`, `attention.ts`); `engine` job (5 min) sends each alert once per period plus task due reminders (exact time 1 h before, date-only 09:00, exam prep 48 h); Needs-attention card with Keep going / Pause / Change target / Archive, answers recorded (`goal_decisions`, 0017); chat `get_attention`, `respond_to_goal` | ✅ live 2026-10-01 |
 | 5 | Command center and daily brief v2: one facts loader (`loadBriefFacts`) shared by the brief, `/` and chat; focus score (`focus.ts`); brief stored with per-line source rows (`briefs`, 0018); AI focus note written as placeholders only, validated, with a fixed-template fallback; brief window 08:00–12:00 IST, push exempt from cap and digest; `/` rebuilt mobile-first (glance chips, focus card, calendar, day strip, effort field, Move to tomorrow, active tab) | ✅ live 2026-10-03 |
 | 6 | AI chief of staff and scoped memory: provider-neutral model types; chat history stored neutral with `marker` rows for New conversation (0019); scoped memory (global / MESA / project / person) with a save guard, `search_memory`, legacy goal/project notes reviewed on `/settings/memory`; planning tools (`get_focus`, `get_week`, `get_accomplished`, `get_commitments`, extended `get_attention`); channel-neutral prompt; grounding guard on every chat answer; web chat transcript with paging, sources caption and starter chips | ✅ live 2026-10-03 |
-| 7 | Weekly and monthly reviews (migration 0020; reuses `briefs.kind`) | — |
+| 6+ | Extras: **pre-class prep** — `prep` job (5 min): session number worked out from recordings + timetable (`class-prep.ts`), that session's pre-read and materials, AI key points stored once per document (`prep_notes`, 0020; numbers not in the document are dropped), push ~30 min before each MESA session, 20:00 list of tomorrow's pre-reads, `/classes/[id]`, chat `get_class_prep`. **Share to JARVIS** — PWA share target (Android) → service worker → `/share` (ask JARVIS or add as task); 📎 in chat (all phones); files uploaded straight to Storage (signed URL, ≤ 25 MB), stored by sha256, text extracted (PDF, Office, text; images read by the model) for `read_file_text`. **Voice** — 🎤 in chat: recorded, re-encoded to 16 kHz WAV in the browser, transcribed (silence never sent to the model) into the box for review; 🔊 read-aloud on replies | built 2026-10-03 |
+| 7 | Weekly and monthly reviews (migration 0021; reuses `briefs.kind`) | — |
 | 8 | Approval and action system | — |
 | 9 | Google OAuth and two-way calendar | — |
 | 10 | Gmail | — |
@@ -33,8 +34,8 @@ The full plan covers architecture, data model, phases and risks. Decisions:
   the focus note and the grounding checker in `packages/ai` (`focus-note.ts`, `grounding.ts`); the brief renderer
   stays in `packages/sync/src/brief.ts`. One loader serves the brief, `/` and the chat tools, with no package cycle.
 - **Migrations 0018 and 0019.** `0018_briefs.sql` adds the briefs table (with `kind`, daily only for now);
-  `0019_memory_scopes.sql` adds memory scopes and chat `format` / `meta` / the `marker` role. Phase 7 therefore
-  starts at **0020** and widens `briefs.kind` to weekly and monthly instead of adding a table.
+  `0019_memory_scopes.sql` adds memory scopes and chat `format` / `meta` / the `marker` role. Phase 7 starts at
+  **0021** (0020 went to class prep) and widens `briefs.kind` to weekly and monthly instead of adding a table.
   0019 was tightened before it was ever applied: a project-scoped memory must have a non-null subject.
 - **`get_at_risk` is `get_attention`,** extended (deadlines at risk, slipping habits, overdue count, system health with
   `lms_stale` after 3 h). There is no alias: every extra tool declaration costs tokens on every request.

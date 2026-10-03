@@ -3,9 +3,21 @@
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CHAT_STARTERS, chatCaption, contextDividerIndex, dayLabel, escapeChatText, groupByDay, sourceLabels, timeLabel, type ChatView } from "@/lib/chat-view";
+import { CHAT_DRAFT_KEY, sharedLine, uploadShared, type SharedFile } from "@/lib/share-client";
+import { speak, speechSupported, startRecording, stopSpeaking, transcribe, voiceSupported, type Recording } from "@/lib/voice-client";
 
 // The web conversation: the stored transcript (rendered on the server) plus whatever is said on this page.
 // Replies arrive as HTML from the server's escape-first converter (only b/i/a/code/pre are re-introduced).
+
+type Attachment = { key: number; name: string; state: "uploading" | "ready" | "error"; file?: SharedFile; error?: string };
+type Voice = "idle" | "recording" | "transcribing";
+
+/** Plain text of a reply's HTML, for reading aloud. */
+const plainText = (html: string) => {
+  const el = document.createElement("div");
+  el.innerHTML = html.replace(/<br\s*\/?>/gi, "\n");
+  return (el.textContent ?? "").replace(/\s+\n/g, "\n").trim();
+};
 
 type Reply = { html?: string; sources?: string[]; at?: string; repaired?: boolean; guarded?: boolean; error?: string };
 
@@ -27,6 +39,7 @@ export function ChatBox({
   contextStartId,
   olderPage,
   loadError,
+  draft,
 }: {
   initial: ChatView[];
   nextBefore: number | null;
@@ -34,6 +47,8 @@ export function ChatBox({
   /** Showing a ?before= page: read-only, with a way back to the latest messages. */
   olderPage: boolean;
   loadError: boolean;
+  /** Prefilled message (?q= from a class page or a link). */
+  draft?: string;
 }) {
   const [items, setItems] = useState(initial);
   const [input, setInput] = useState("");
@@ -44,6 +59,42 @@ export function ChatBox({
   const box = useRef<HTMLTextAreaElement>(null);
   const menu = useRef<HTMLDetailsElement>(null);
   const tempId = useRef(0);
+  const picker = useRef<HTMLInputElement>(null);
+  const recording = useRef<Recording | null>(null);
+  const [files, setFiles] = useState<Attachment[]>([]);
+  const [voice, setVoice] = useState<Voice>("idle");
+  const [seconds, setSeconds] = useState(0);
+  const [speaking, setSpeaking] = useState<number | null>(null);
+  const [canVoice, setCanVoice] = useState(false);
+  const [canSpeak, setCanSpeak] = useState(false);
+
+  // Feature checks and a handed-over draft (share page → sessionStorage, class page → ?q=) after mount.
+  useEffect(() => {
+    setCanVoice(voiceSupported());
+    setCanSpeak(speechSupported());
+    let handed: string | null = null;
+    try {
+      handed = sessionStorage.getItem(CHAT_DRAFT_KEY);
+      if (handed) sessionStorage.removeItem(CHAT_DRAFT_KEY);
+    } catch {
+      /* storage blocked */
+    }
+    const text = handed || draft;
+    if (text) {
+      setInput(text);
+      box.current?.focus();
+    }
+    return () => {
+      recording.current?.cancel();
+      stopSpeaking();
+    };
+  }, [draft]);
+  useEffect(() => {
+    if (voice !== "recording") return;
+    setSeconds(0);
+    const t = setInterval(() => setSeconds((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [voice]);
   const view = (v: Omit<ChatView, "id" | "timeLabel" | "dayLabel">): ChatView => ({ ...v, id: -++tempId.current, timeLabel: timeLabel(v.at), dayLabel: dayLabel(v.at, new Date()) });
 
   // Open at the newest message, without an animated scroll through the history.
@@ -82,12 +133,77 @@ export function ChatBox({
     }
   }
 
+  const uploading = files.some((f) => f.state === "uploading");
+
   function send(raw: string) {
-    const text = raw.trim();
-    if (!text || busy) return;
+    const ready = files.filter((f) => f.state === "ready" && f.file);
+    const text = [raw.trim(), ...ready.map((f) => sharedLine(f.file!))].filter(Boolean).join("\n");
+    if (!text || busy || uploading) return;
+    setFiles([]);
     setItems((m) => [...m, view({ role: "user", html: escapeChatText(text), at: new Date().toISOString(), sources: [], guarded: false })]);
     setInput("");
     void ask(text);
+  }
+
+  async function attach(list: FileList | null) {
+    for (const file of Array.from(list ?? []).slice(0, 5)) {
+      const key = ++tempId.current;
+      setFiles((f) => [...f, { key, name: file.name, state: "uploading" }]);
+      try {
+        const done = await uploadShared(file);
+        setFiles((f) => f.map((a) => (a.key === key ? { ...a, state: "ready", file: done } : a)));
+      } catch (err) {
+        setFiles((f) => f.map((a) => (a.key === key ? { ...a, state: "error", error: err instanceof Error ? err.message : "Upload failed" } : a)));
+      }
+    }
+    if (picker.current) picker.current.value = "";
+  }
+
+  async function startVoice() {
+    setNotice(null);
+    stopSpeaking();
+    setSpeaking(null);
+    try {
+      recording.current = await startRecording(() => void finishVoice());
+      setVoice("recording");
+    } catch {
+      setNotice("Microphone not available. Allow microphone access for JARVIS in your browser or phone settings.");
+    }
+  }
+
+  async function finishVoice() {
+    const rec = recording.current;
+    recording.current = null;
+    if (!rec) return;
+    setVoice("transcribing");
+    try {
+      const wav = await rec.stop();
+      const text = wav ? await transcribe(wav) : "";
+      if (text) {
+        setInput((v) => (v.trim() ? `${v.trim()} ${text}` : text));
+        box.current?.focus();
+      } else setNotice("Didn't catch anything — try again a little closer to the mic.");
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Couldn't transcribe that");
+    } finally {
+      setVoice("idle");
+    }
+  }
+
+  function cancelVoice() {
+    recording.current?.cancel();
+    recording.current = null;
+    setVoice("idle");
+  }
+
+  function toggleSpeak(m: ChatView) {
+    if (speaking === m.id) {
+      stopSpeaking();
+      setSpeaking(null);
+      return;
+    }
+    setSpeaking(m.id);
+    speak(plainText(m.html), () => setSpeaking((id) => (id === m.id ? null : id)));
   }
 
   async function newConversation() {
@@ -158,7 +274,14 @@ export function ChatBox({
                   ) : (
                     <div className="flex flex-col items-start">
                       <div className={`${bubble} prose-chat bg-[var(--color-line)]`} dangerouslySetInnerHTML={{ __html: m.html }} />
-                      <p className="mt-1 max-w-[85%] px-1 text-xs text-[var(--color-muted)]">{chatCaption(m)}</p>
+                      <p className="mt-1 flex max-w-[85%] items-center gap-2 px-1 text-xs text-[var(--color-muted)]">
+                        <span>{chatCaption(m)}</span>
+                        {canSpeak && (
+                          <button type="button" onClick={() => toggleSpeak(m)} aria-label={speaking === m.id ? "Stop reading" : "Read aloud"} className="-my-2 inline-flex min-h-9 min-w-9 items-center justify-center rounded-full hover:bg-[var(--color-line)]">
+                            {speaking === m.id ? "⏹" : "🔊"}
+                          </button>
+                        )}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -203,8 +326,52 @@ export function ChatBox({
             e.preventDefault();
             send(input);
           }}
-          className="flex items-end gap-2 border-t border-[var(--color-line)] p-2 sm:p-3"
+          className="border-t border-[var(--color-line)] p-2 sm:p-3"
         >
+          {files.length > 0 && (
+            <ul className="mb-2 flex flex-wrap gap-1.5">
+              {files.map((f) => (
+                <li key={f.key} className={`flex max-w-full items-center gap-1 rounded-full border border-[var(--color-line)] py-0.5 pr-0.5 pl-2.5 text-xs ${f.state === "error" ? "text-[var(--color-bad)]" : ""}`}>
+                  <span className="truncate">
+                    📎 {f.name}
+                    {f.state === "uploading" ? " · uploading…" : f.state === "error" ? ` · ${f.error}` : f.file && f.file.textStatus !== "done" ? " · no readable text" : ""}
+                  </span>
+                  <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((all) => all.filter((a) => a.key !== f.key))} className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-full hover:bg-[var(--color-line)]">
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {voice !== "idle" ? (
+            <div className="flex items-center gap-2">
+              <div role="status" className="flex min-h-11 flex-1 items-center gap-2 rounded-xl border border-[var(--color-line)] px-3 text-sm">
+                {voice === "recording" ? (
+                  <>
+                    <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-[var(--color-bad)]" />
+                    Listening… {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}
+                  </>
+                ) : (
+                  <span className="text-[var(--color-muted)]">Transcribing…</span>
+                )}
+              </div>
+              {voice === "recording" && (
+                <>
+                  <button type="button" onClick={cancelVoice} aria-label="Cancel voice note" className="min-h-11 min-w-11 shrink-0 rounded-xl border border-[var(--color-line)] text-sm">
+                    ✕
+                  </button>
+                  <button type="button" onClick={() => void finishVoice()} className="min-h-11 shrink-0 rounded-xl bg-[var(--color-accent)] px-4 text-sm font-medium text-white">
+                    Done
+                  </button>
+                </>
+              )}
+            </div>
+          ) : (
+          <div className="flex items-end gap-2">
+          <input ref={picker} type="file" multiple hidden accept="image/*,application/pdf,.pdf,.docx,.pptx,.xlsx,.txt,.csv,.md" onChange={(e) => void attach(e.target.files)} />
+          <button type="button" onClick={() => picker.current?.click()} aria-label="Attach a file or photo" className="min-h-11 min-w-11 shrink-0 rounded-xl border border-[var(--color-line)] text-lg leading-none">
+            📎
+          </button>
           <textarea
             ref={box}
             value={input}
@@ -224,9 +391,17 @@ export function ChatBox({
             // 16 px text: iOS zooms into smaller inputs on focus.
             className="max-h-[8.75rem] min-h-11 min-w-0 flex-1 resize-none rounded-xl border border-[var(--color-line)] bg-transparent px-3 py-2.5 text-base leading-6 outline-none focus:border-[var(--color-accent)]"
           />
-          <button disabled={busy || !input.trim()} className="min-h-11 shrink-0 rounded-xl bg-[var(--color-accent)] px-4 text-sm font-medium text-white disabled:opacity-50">
-            Send
-          </button>
+          {canVoice && !input.trim() && !files.length ? (
+            <button type="button" onClick={() => void startVoice()} aria-label="Speak a message" className="min-h-11 min-w-11 shrink-0 rounded-xl bg-[var(--color-accent)] text-lg leading-none text-white">
+              🎤
+            </button>
+          ) : (
+            <button disabled={busy || uploading || (!input.trim() && !files.some((f) => f.state === "ready"))} className="min-h-11 shrink-0 rounded-xl bg-[var(--color-accent)] px-4 text-sm font-medium text-white disabled:opacity-50">
+              Send
+            </button>
+          )}
+          </div>
+          )}
         </form>
       )}
     </div>

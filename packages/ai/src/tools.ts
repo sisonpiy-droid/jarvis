@@ -308,9 +308,52 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
       },
     },
     {
+      name: "get_class_prep",
+      effect: "read",
+      description:
+        "What to prepare for upcoming MESA classes: the session number (worked out from recordings and the timetable), that session's pre-reads and materials (file_id to read their text, or a link), stored key points of each pre-read, and the course's assignments due around the class. Use for 'what should I prepare for tomorrow', 'what's the pre-read for DDDM', 'prep for my next class'.",
+      parameters: obj({
+        course: { type: "string", description: "Optional course words, short name (DDDM) or professor name; omit for all classes" },
+        date: { type: "string", description: "Optional 'today' | 'tomorrow' | YYYY-MM-DD (IST); default: the next 7 days" },
+        limit: { type: "integer", description: "Classes to return (default 3, max 8)" },
+      }),
+      async run(a) {
+        const date = str(a.date);
+        if (date && date !== "today" && date !== "tomorrow" && !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must be today, tomorrow or YYYY-MM-DD");
+        const range = date ? istRange(date, 1, now()) : { from: now().toISOString(), to: new Date(now().getTime() + 7 * 86_400_000).toISOString() };
+        const from = new Date(Math.max(Date.parse(range.from), date === "today" || !date ? now().getTime() - 60 * 60_000 : 0));
+        const course = str(a.course).replace(/^(prof\.?|professor|dr\.?)\s+/i, "");
+        const words = course ? titleWords(course) : null;
+        const rows = await sql`
+          select e.source_id from jarvis.lms_items e
+            left join jarvis.lms_items c on c.kind = 'course' and c.source_id = e.course_id
+           where e.kind = 'event' and e.removed_at is null and e.course_id is not null
+             and e.data ->> 'eventType' = 'session' and coalesce(e.data ->> 'status', '') <> 'cancelled'
+             and e.sort_at >= ${from.toISOString()} and e.sort_at < ${range.to}
+             ${words ? sql`and (coalesce(c.title, e.title) ilike all(${words}) or e.title ilike all(${words}) or c.data ->> 'shortName' ilike ${course} or coalesce(c.data ->> 'instructor', '') ilike all(${words}))` : sql``}
+           order by e.sort_at limit ${clampInt(a.limit, 1, 8, 3)}`;
+        const preps = (await Promise.all(rows.map((r) => db.classPrep(sql, String(r.source_id), now())))).filter((p): p is db.ClassPrep => !!p);
+        if (!preps.length) return { classes: [], note: `No MESA classes${course ? ` for "${course}"` : ""} in that window.` };
+        return {
+          classes: preps.map((p) => ({
+            when: fmt(p.event.startAt),
+            course: p.event.course,
+            short: p.event.short,
+            title: p.event.title,
+            room: p.event.room,
+            session: p.session,
+            materials_basis: p.match === "session" ? `matched to session ${p.session}` : p.match === "recent" ? "session number unknown — these are the course's newest materials, not confirmed as this class's pre-read" : "nothing found",
+            materials: p.items.map((i) => ({ title: i.title, folder: i.folder, pre_read: i.preRead, ...(i.fileId ? { file_id: i.fileId } : {}), ...(i.url ? { link: i.url } : {}), has_text: i.hasText, ...(i.points?.length ? { key_points: i.points } : {}) })),
+            due_soon: p.due.map((d) => ({ id: d.id, title: d.title, due: fmt(d.dueAt) })),
+            page: `/classes/${p.event.id}`,
+          })),
+        };
+      },
+    },
+    {
       name: "read_file_text",
       effect: "read",
-      description: "Extracted text of a downloaded Word/PowerPoint/Excel file (by file_id from other tools). PDFs are stored as originals and have no text here.",
+      description: "Extracted text of a stored file — PDFs, Word/PowerPoint/Excel, and images or files shared to JARVIS (by file_id from other tools or from a 'Shared file' line). Scanned PDFs have no text.",
       parameters: obj({ file_id: { type: "string" }, max_chars: { type: "integer", description: "default 12000, max 30000" } }, ["file_id"]),
       async run(a) {
         const [f] = await sql`select original_filename, text_status, text_content from jarvis.files where sha256 = ${str(a.file_id)}`;

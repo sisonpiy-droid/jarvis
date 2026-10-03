@@ -34,14 +34,29 @@ function loadServiceWorker(opts: { windows?: Array<{ url: string; focus: () => P
     clients: { claim: vi.fn(async () => {}), matchAll: vi.fn(async () => opts.windows ?? []), openWindow },
     navigator: {},
   };
+  // A tiny CacheStorage: one store per name, keyed by request path.
+  const stores = new Map<string, Map<string, Response>>();
+  const caches = {
+    async open(name: string) {
+      const m = stores.get(name) ?? new Map<string, Response>();
+      stores.set(name, m);
+      return {
+        keys: async () => [...m.keys()],
+        delete: async (k: string) => m.delete(k),
+        put: async (k: string, r: Response) => void m.set(k, r),
+        match: async (k: string) => m.get(k)?.clone(),
+      };
+    },
+    delete: async (name: string) => stores.delete(name),
+  };
   const src = readFileSync(join(import.meta.dirname, "..", "public", "sw.js"), "utf8");
-  new Function("self", "fetch", "Response", src)(self, fetchMock, Response);
+  new Function("self", "fetch", "Response", "caches", src)(self, fetchMock, Response, caches);
   const fire = async (type: string, event: Record<string, unknown>) => {
     let done: Promise<unknown> = Promise.resolve();
     listeners[type]!({ ...event, waitUntil: (p: Promise<unknown>) => (done = p), respondWith: (p: Promise<unknown>) => (done = p) });
     return done;
   };
-  return { fire, showNotification, openWindow, fetchMock };
+  return { fire, showNotification, openWindow, fetchMock, stores };
 }
 
 describe("service worker", () => {
@@ -90,6 +105,30 @@ describe("service worker", () => {
     await sw.fire("notificationclick", { action: "habit-skip", notification: { close: () => {}, data: { url: "https://jarvis.app/q/habit/7?d=2026-10-01", ids: [] } } });
     expect(sw.fetchMock).toHaveBeenCalledWith("/api/habits/log", expect.objectContaining({ body: JSON.stringify({ id: 7, day: "2026-10-01", status: "skipped", source: "push_action" }) }));
     expect(sw.openWindow).toHaveBeenCalledWith("https://jarvis.app/q/habit/7?d=2026-10-01");
+  });
+
+  it("parks a share-sheet post (text, link, files) and opens /share", async () => {
+    const sw = loadServiceWorker();
+    const form = new FormData();
+    form.set("title", "Groww results");
+    form.set("text", "Read before class");
+    form.set("url", "https://example.com/groww");
+    form.append("files", new File(["%PDF-1.4"], "groww.pdf", { type: "application/pdf" }));
+    form.append("files", new File([], "empty.txt"));
+    const request = { method: "POST", mode: "navigate", url: "https://jarvis.app/share-target", formData: async () => form };
+    const res = (await sw.fire("fetch", { request })) as Response;
+    expect([res.status, res.headers.get("location")]).toEqual([303, "https://jarvis.app/share"]);
+    const store = sw.stores.get("jarvis-share-v1")!;
+    const meta = await store.get("/__share/meta")!.clone().json();
+    expect(meta).toMatchObject({ title: "Groww results", text: "Read before class", url: "https://example.com/groww", files: [{ name: "groww.pdf", type: "application/pdf", size: 8 }] });
+    expect(await store.get("/__share/file/0")!.clone().text()).toBe("%PDF-1.4");
+    expect(store.has("/__share/file/1")).toBe(false); // empty files are dropped
+  });
+
+  it("leaves other POSTs to the network", async () => {
+    const sw = loadServiceWorker();
+    const done = await sw.fire("fetch", { request: { method: "POST", mode: "cors", url: "https://jarvis.app/api/chat" } });
+    expect(done).toBeUndefined(); // respondWith was never called
   });
 
   it("serves an offline page when a navigation fails", async () => {

@@ -17,6 +17,7 @@ const NAV = [
   ["/drafts", "Drafts"],
   ["/classes", "Classes"],
   ["/chat", "Chat"],
+  ["/share", "Share"],
   ["/status", "Status"],
   ["/settings", "Settings"],
 ] as const;
@@ -74,6 +75,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </Link>
           <Link href="/classes" className="text-[var(--color-muted)] no-underline">
             Classes
+          </Link>
+          <Link href="/share" className="text-[var(--color-muted)] no-underline">
+            Share
           </Link>
           <Link href="/status" className="text-[var(--color-muted)] no-underline">
             Status

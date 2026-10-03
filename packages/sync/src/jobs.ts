@@ -3,6 +3,7 @@ import type { JobStatus, JobTrigger, NotificationDraft, Sql } from "@jarvis/db";
 import { runNotificationService } from "@jarvis/notify";
 import type { Logger } from "@jarvis/shared";
 import { dailyBrief } from "./brief";
+import { runClassPrep } from "./class-prep";
 import { runEngine } from "./engine";
 import { syncCalendar } from "./calendar";
 import { mesaSync, nextToDraft, type SyncDeps, type SyncOptions, type SyncSummary } from "./run";
@@ -12,11 +13,11 @@ import { istHour } from "./time";
 // under its own lease lock and reports to jarvis.jobs (heartbeat) and jarvis.job_runs (history). A failure in
 // one job never blocks the others.
 
-export const JOB_NAMES = ["mesa", "calendar", "notify", "briefs", "drafts", "habits", "engine", "health"] as const;
+export const JOB_NAMES = ["mesa", "calendar", "notify", "briefs", "drafts", "habits", "engine", "prep", "health"] as const;
 export type JobName = (typeof JOB_NAMES)[number];
 export const isJobName = (s: string): s is JobName => (JOB_NAMES as readonly string[]).includes(s);
 
-/** pg_cron schedules; must match the cadences seeded in migrations 0012, 0016 and 0017. */
+/** pg_cron schedules; must match the cadences seeded in migrations 0012, 0016, 0017 and 0020. */
 export const JOB_SCHEDULES: Record<JobName, string> = {
   mesa: "*/5 * * * *",
   calendar: "*/5 * * * *", // 5 min: the 30-minute heads-up window needs it
@@ -25,6 +26,7 @@ export const JOB_SCHEDULES: Record<JobName, string> = {
   drafts: "*/10 * * * *",
   habits: "*/5 * * * *",
   engine: "*/5 * * * *",
+  prep: "*/5 * * * *",
   health: "*/15 * * * *",
 };
 
@@ -37,6 +39,7 @@ const LEASE_MS: Record<JobName, number> = {
   drafts: 2 * 60_000,
   habits: 2 * 60_000,
   engine: 2 * 60_000,
+  prep: 2 * 60_000,
   health: 2 * 60_000,
 };
 
@@ -166,6 +169,13 @@ export const jobBodies: Record<JobName, (deps: SyncDeps, opts: SyncOptions, now:
     const s = await runEngine(deps.sql, now);
     if (!s.queued) return { status: "idle", ...(s.goals ? { stats: { ...s } } : {}) };
     return { status: "success", stats: { ...s } };
+  },
+
+  async prep(deps, _opts, now) {
+    const s = await runClassPrep(deps.sql, now, deps.model ?? null, deps.log);
+    const worked = s.queued || s.summarized || s.summaryErrors;
+    if (!worked) return { status: "idle", ...(s.upcoming ? { stats: { ...s } } : {}) };
+    return { status: s.summaryErrors && !s.summarized && !s.queued ? "failed" : "success", stats: { ...s }, ...(s.summaryErrors ? { error: `${s.summaryErrors} pre-read summary call(s) failed` } : {}) };
   },
 
   async health(deps) {
