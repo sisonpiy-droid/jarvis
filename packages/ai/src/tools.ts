@@ -202,6 +202,56 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
       },
     },
     {
+      name: "get_course",
+      effect: "read",
+      description:
+        "Everything about one MESA course, found by course name, short name (e.g. DDDM) or the professor's name (e.g. 'Vinay'): instructor, classes held so far and upcoming, recordings, materials by folder (session workbooks, pre-reads, outlines — with file_id to read their text), and assignments with deadlines and status. Use for 'what has <professor> taught', 'what did we cover in <course>', 'what's left in <course>'.",
+      parameters: obj({ query: { type: "string", description: "Course name words, short name, or professor name" } }, ["query"]),
+      async run(a) {
+        const q = str(a.query).replace(/^(prof\.?|professor|dr\.?)\s+/i, "");
+        if (q.length < 2) throw new Error("query is required");
+        const courses = await sql`
+          select source_id, title, data from jarvis.lms_items
+           where kind = 'course' and removed_at is null
+             and (title ilike all(${titleWords(q)}) or data ->> 'shortName' ilike ${q} or data ->> 'instructor' ilike all(${titleWords(q)}))
+           order by title limit 6`;
+        if (!courses.length) return { found: false, hint: "No course matches; try search_lms with the same words." };
+        if (courses.length > 1) return { found: "multiple", candidates: courses.map((c) => ({ course: c.title, short: c.data.shortName, instructor: c.data.instructor })) };
+        const c = courses[0]!;
+        const t = now().toISOString();
+        const [events, recordings, materials, assignments] = await Promise.all([
+          sql`select title, sort_at, data from jarvis.lms_items where kind = 'event' and course_id = ${c.source_id} and removed_at is null order by sort_at`,
+          sql`select title, sort_at from jarvis.lms_items where kind = 'recording' and course_id = ${c.source_id} and removed_at is null order by sort_at`,
+          sql`
+            select m.title, m.sort_at, m.data ->> 'topicTitle' as folder, x.sha256, x.text_status
+              from jarvis.lms_items m
+              left join jarvis.item_files f on f.kind = 'material' and f.item_id = m.source_id
+              left join jarvis.files x on x.sha256 = f.sha256
+             where m.kind = 'material' and m.course_id = ${c.source_id} and m.removed_at is null
+             order by m.sort_at nulls last limit 80`,
+          sql`select source_id, title, data from jarvis.lms_items where kind = 'assignment' and course_id = ${c.source_id} and removed_at is null order by sort_at nulls last`,
+        ]);
+        const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : (v as string | null));
+        const session = (e: (typeof events)[number]) => ({ when: e.data.startAtIst ?? fmt(iso(e.sort_at)), title: e.title, type: e.data.eventType, status: e.data.status, about: short(e.data.descriptionText, 300) });
+        const folders: Record<string, Array<{ title: string; date: string | null; file_id?: string; has_text: boolean }>> = {};
+        for (const m of materials) (folders[String(m.folder ?? "Other")] ??= []).push({ title: String(m.title), date: fmt(iso(m.sort_at)), ...(m.sha256 ? { file_id: String(m.sha256) } : {}), has_text: m.text_status === "done" });
+        return {
+          course: c.title,
+          short: c.data.shortName,
+          instructor: c.data.instructor,
+          term: c.data.termName,
+          about: short(c.data.descriptionText, 600),
+          url: c.data.sourceUrl,
+          classes_held: events.filter((e) => iso(e.sort_at)! < t).map(session),
+          classes_upcoming: events.filter((e) => iso(e.sort_at)! >= t).map(session),
+          recordings: recordings.map((r) => ({ title: r.title, date: fmt(iso(r.sort_at)) })),
+          materials_by_folder: folders,
+          assignments: assignments.map((x) => ({ id: x.source_id, title: x.title, due: x.data.dueAtIst, status: x.data.submissionStatus })),
+          hint: "Session titles, recordings, workbooks and assignment case names show what was taught; read an outline or workbook with read_file_text(file_id) for detail.",
+        };
+      },
+    },
+    {
       name: "read_file_text",
       effect: "read",
       description: "Extracted text of a downloaded Word/PowerPoint/Excel file (by file_id from other tools). PDFs are stored as originals and have no text here.",
