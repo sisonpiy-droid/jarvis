@@ -1,4 +1,4 @@
-# Minimal Supabase CLI config — only used to deploy the Edge Function.
+# Minimal Supabase CLI config — only used to deploy the Edge Functions.
 project_id = "jarvis"
 
 [functions.mesa-sync]
@@ -16,3 +16,8 @@ entrypoint = "./functions/telegram-bot/index.js"
 # Called by mesa-sync / telegram-bot with the shared secret (checked in code).
 verify_jwt = false
 entrypoint = "./functions/assignment-draft/index.js"
+
+[functions.jarvis-tick]
+# Called by pg_cron, once per scheduled job (?job=…), with the shared secret (checked in code).
+verify_jwt = false
+entrypoint = "./functions/jarvis-tick/index.js"

@@ -67,3 +67,15 @@ export async function calendarToken(): Promise<string> {
 export async function calendarFeedUrl(): Promise<string> {
   return `${baseUrl()}/cal/${await calendarToken()}/mesa-classes.ics`;
 }
+
+/** Starts a session on a response (used by every sign-in method). */
+export async function startSession(res: { cookies: { set(name: string, value: string, opts: Record<string, unknown>): unknown } }): Promise<void> {
+  const s = await makeSession();
+  res.cookies.set(SESSION_COOKIE, s.value, { httpOnly: true, secure: baseUrl().startsWith("https"), sameSite: "lax", path: "/", maxAge: s.maxAge });
+}
+
+export function sessionSecret(): string {
+  const secret = process.env.WEB_SESSION_SECRET;
+  if (!secret || secret.length < 32) throw new Error("WEB_SESSION_SECRET is not configured");
+  return secret;
+}

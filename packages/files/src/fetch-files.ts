@@ -2,6 +2,7 @@ import type { Sql } from "@jarvis/db";
 import type { MesaClient } from "@jarvis/mesa";
 import type { Logger } from "@jarvis/shared";
 import { extractOfficeText, officeKind } from "./office-text";
+import { extractPdfText, isPdf } from "./pdf-text";
 import type { BlobStorage } from "./storage";
 
 // Downloads LMS attachments into Storage a few at a time, so each sync stays
@@ -135,6 +136,14 @@ export async function fetchPendingFiles(deps: FetchDeps, budget: FetchBudget = D
           } catch (e) {
             status = "failed";
             log?.warn("text extraction failed", { file: fileName, error: e });
+          }
+        } else if (isPdf(fileName, mime)) {
+          // A PDF without a text layer (scanned) stays 'original'; a broken one is still stored.
+          try {
+            text = await extractPdfText(bytes);
+            if (text) status = "done";
+          } catch (e) {
+            log?.warn("pdf text extraction failed", { file: fileName, error: e });
           }
         }
         await sql`

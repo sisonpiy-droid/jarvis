@@ -1,4 +1,5 @@
-// Notification channels. V1: Telegram. A channel only has to deliver text;
+// Notification channels and the provider-independent notification service (service.ts). Telegram is the
+// legacy channel, kept for rollback until Phase 11. A channel only has to deliver text;
 // deciding *what* to say (and deduping it) happens upstream in the sync engine.
 
 export interface Channel {
@@ -60,3 +61,10 @@ export function planMessages(items: Outgoing[], individualMax = 3, limit = TELEG
     text: `🗂 <b>${items.length} MESA updates</b>${chunks.length > 1 ? ` (${i + 1}/${chunks.length})` : ""}\n\n${c.parts.join(sep)}`,
   }));
 }
+
+export * from "./render";
+export * from "./settings";
+export * from "./policy";
+export * from "./webpush";
+export * from "./email";
+export * from "./service";

@@ -1,4 +1,5 @@
 import "server-only";
+import { activePushSubscriptions, deliveryStats, jobHealth, type Sql } from "@jarvis/db";
 import { db } from "./db";
 
 // Read-only queries for the dashboard. Everything comes from jarvis.* — the
@@ -174,7 +175,15 @@ export async function status() {
   const notes = await sql`select id, priority, status, scheduled_for, sent_at, left(text, 160) as text from jarvis.notifications order by id desc limit 25`;
   const files = await sql`select status, count(*)::int as n from jarvis.item_files group by status`;
   const [stored] = await sql`select count(*)::int as n, coalesce(sum(size_bytes), 0)::bigint as bytes from jarvis.files`;
+  // null until migration 0012 is applied.
+  const jobs = await jobHealth(sql as unknown as Sql).catch(() => null);
+  // null until migration 0013 is applied.
+  const delivery = await deliveryStats(sql as unknown as Sql).catch(() => null);
+  const devices = await activePushSubscriptions(sql as unknown as Sql).then((d) => d.length).catch(() => null);
   return {
+    jobs,
+    delivery,
+    devices,
     integ: integ && { status: integ.status as string, expires: iso(integ.session_expires_at), lastSuccess: iso(integ.last_success_at), lastFull: iso(integ.last_full_at), failures: Number(integ.consecutive_failures), error: integ.last_error as string | null },
     runs: runs.map((r) => ({ id: Number(r.id), kind: r.kind as string, trigger: r.trigger as string, status: r.status as string, at: iso(r.started_at)!, secs: r.finished_at ? Math.round((new Date(r.finished_at).getTime() - new Date(r.started_at).getTime()) / 1000) : null, requests: r.request_count as number | null, notifications: r.notifications as number | null, changes: r.changes as J | null, error: r.error as string | null })),
     notes: notes.map((n) => ({ id: Number(n.id), priority: n.priority as string, status: n.status as string, at: iso(n.sent_at ?? n.scheduled_for)!, text: String(n.text).replace(/<[^>]+>/g, "") })),

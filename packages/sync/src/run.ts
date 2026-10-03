@@ -1,4 +1,5 @@
 import * as db from "@jarvis/db";
+import type { ModelProvider } from "@jarvis/ai";
 import type { ChangeSet, EventDraft, ItemKind, ItemRow, NotificationDraft, Sql } from "@jarvis/db";
 import {
   MesaAuthError,
@@ -11,10 +12,8 @@ import {
   type MesaSnapshot,
 } from "@jarvis/mesa";
 import { fetchPendingFiles, type BlobStorage, type FetchResult } from "@jarvis/files";
-import { planMessages, type Channel } from "@jarvis/notify";
+import type { Channel, NotifyChannels } from "@jarvis/notify";
 import type { Logger } from "@jarvis/shared";
-import { morningBrief } from "./brief";
-import { syncCalendar } from "./calendar";
 import { dbSessionStore } from "./db-session";
 import { diffItems, type Diff, type Keyed } from "./diff";
 import {
@@ -30,22 +29,27 @@ import {
   type RuleOutput,
 } from "./rules";
 import { deliveryTime } from "./time";
+import { syncWork, type WorkSummary } from "./work";
 
 const PROVIDER = "mesa";
-const LOCK = "mesa-sync";
 const FULL_EVERY_MS = 6 * 3_600_000;
 const SESSION_WARN_MS = 3 * 86_400_000;
 
 export interface SyncDeps {
   sql: Sql;
   sessionKey: string;
+  /** Legacy Telegram channel (rollback until Phase 11). Optional: push, email and the inbox work without it. */
   channel: Channel | null;
-  /** Called with open, unsubmitted assignments that still need a draft (at most one per run). Never blocks the sync. */
+  /** Push / email configuration for the notification service (the in-app inbox needs none). */
+  notify?: Omit<NotifyChannels, "telegram"> | null;
+  /** Called with open, unsubmitted assignments that still need a draft (the `drafts` job, at most one per run). */
   onNewAssignments?: (ids: string[]) => Promise<void>;
-  /** Private Google Calendar iCal URL; when set, each run also syncs the calendar. */
+  /** Private Google Calendar iCal URL; when set, the `calendar` job syncs it. */
   icsUrl?: string | null;
-  /** When set, each run also downloads a few pending LMS files into Storage. */
+  /** When set, each MESA sync also downloads a few pending LMS files into Storage. */
   storage?: BlobStorage | null;
+  /** Writes the brief's focus note (one call a day). Without it the brief uses the fixed-template note. */
+  model?: ModelProvider | null;
   log: Logger;
   fetch?: typeof fetch;
   now?: () => Date;
@@ -70,6 +74,7 @@ export interface SyncSummary {
   queued?: number;
   sent?: number;
   files?: FetchResult;
+  work?: WorkSummary;
   error?: string;
 }
 
@@ -103,105 +108,75 @@ function toRow(kind: ItemKind, item: AnyItem): ItemRow {
   };
 }
 
-/** Sends everything that is due, digesting bursts. Failures stay queued for the next run. */
-export async function dispatchNotifications(sql: Sql, channel: Channel, log?: Logger): Promise<number> {
-  const due = await db.dueNotifications(sql);
-  let sent = 0;
-  for (const msg of planMessages(due)) {
-    try {
-      const id = await channel.send(msg.text);
-      await db.markSent(sql, msg.ids, id);
-      sent += msg.ids.length;
-    } catch (err) {
-      log?.warn("notification send failed", { error: err });
-      await db.markAttemptFailed(sql, msg.ids, err instanceof Error ? err.message : String(err));
-    }
-  }
-  return sent;
-}
-
-export async function runMesaSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncSummary> {
+/**
+ * One MESA sync: extract → diff → rules → one atomic write, then a few file downloads (they need this run's
+ * signed URLs). Locking, notification delivery, the brief and drafting are separate jobs (see jobs.ts).
+ */
+export async function mesaSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncSummary> {
   const { sql, log } = deps;
   const now = deps.now?.() ?? new Date();
-  const holder = crypto.randomUUID();
-  if (!(await db.acquireLock(sql, LOCK, holder, 4 * 60_000))) {
-    log.info("another sync is running; skipping");
-    return { status: "skipped" };
-  }
+  const integ = await db.getIntegration(sql, PROVIDER);
+  if (!integ?.secretSealed) throw new MesaAuthError("No MESA session in the database — run `npm run mesa:login`", "NO_SESSION");
+
+  const due = !integ.lastFullAt || now.getTime() - Date.parse(integ.lastFullAt) >= FULL_EVERY_MS;
+  const kind = opts.force ?? (due ? "full" : "light");
+  const runId = await db.startRun(sql, PROVIDER, kind, opts.trigger);
+  const client = new MesaClient({
+    tokens: new TokenProvider(dbSessionStore(sql, deps.sessionKey)),
+    ...(deps.fetch ? { fetch: deps.fetch } : {}),
+    maxConcurrency: deps.maxConcurrency ?? 3,
+    minGapMs: deps.minGapMs ?? 150,
+  });
+
+  let snap: MesaSnapshot;
   try {
-    if (deps.icsUrl) {
-      await syncCalendar(sql, deps.icsUrl, now, log, deps.fetch).catch((err) => log.warn("calendar sync failed", { error: err }));
-    }
-    const integ = await db.getIntegration(sql, PROVIDER);
-    if (!integ?.secretSealed) throw new MesaAuthError("No MESA session in the database — run `npm run mesa:login`", "NO_SESSION");
-
-    const due = !integ.lastFullAt || now.getTime() - Date.parse(integ.lastFullAt) >= FULL_EVERY_MS;
-    const kind = opts.force ?? (due ? "full" : "light");
-    const runId = await db.startRun(sql, PROVIDER, kind, opts.trigger);
-    const client = new MesaClient({
-      tokens: new TokenProvider(dbSessionStore(sql, deps.sessionKey)),
-      ...(deps.fetch ? { fetch: deps.fetch } : {}),
-      maxConcurrency: deps.maxConcurrency ?? 3,
-      minGapMs: deps.minGapMs ?? 150,
-    });
-
-    let snap: MesaSnapshot;
-    try {
-      snap =
-        kind === "full"
-          ? await extractSnapshot(client, { now, log })
-          : await extractLight(client, { now, log, instructorByCourse: await db.instructorByCourse(sql) });
-    } catch (err) {
-      return await handleFailure(deps, runId, kind, err, now, opts);
-    }
-
-    const cs = await buildChangeSet(sql, snap, integ.baselinedKinds, now);
-    const after = await db.getIntegration(sql, PROVIDER);
-    const sessionWarning = sessionExpiryWarning(after?.sessionExpiresAt ?? null, now);
-    if (sessionWarning) cs.changeSet.notifications.push(sessionWarning);
-
-    const { newNotifications } = await db.applyChanges(sql, cs.changeSet);
-    await db.recordSuccess(sql, PROVIDER, { full: kind === "full", baselined: cs.newlyBaselined });
-    const status = snap.meta.warnings.length ? "partial" : "success";
-    await db.finishRun(sql, runId, {
-      status,
-      requestCount: snap.meta.requestCount,
-      counts: snap.meta.counts,
-      changes: cs.stats,
-      notifications: newNotifications,
-      warnings: snap.meta.warnings,
-    });
-
-    // Once a day, after 08:00 IST: the morning brief (deduped by date, built from fresh data).
-    const brief = await morningBrief(sql, now).catch((err) => (log.warn("brief failed", { error: err }), null));
-    if (brief) await db.enqueueNotifications(sql, [brief]);
-
-    const sent = opts.send !== false && deps.channel ? await dispatchNotifications(sql, deps.channel, log) : 0;
-
-    // Drafting backlog: every open, unsubmitted assignment gets a draft — newest deadline first, one per run
-    // (keeps within the free AI quota). New assignments land here too.
-    if (deps.onNewAssignments) {
-      const next = await nextToDraft(sql, now).catch(() => []);
-      if (next.length) await deps.onNewAssignments(next).catch((err) => log.warn("auto-draft trigger failed", { error: err }));
-    }
-
-    // Files last: alerts are never delayed by downloads, and a download problem never fails the sync.
-    let files: FetchResult | undefined;
-    if (deps.storage) {
-      try {
-        files = await fetchPendingFiles({ sql, client, storage: deps.storage, signedUrls: snap.transient?.signedUrls ?? {}, log, ...(deps.fetch ? { fetch: deps.fetch } : {}) });
-      } catch (err) {
-        log.warn("file fetch failed", { error: err });
-      }
-    }
-    log.info("sync finished", { kind, status, requests: client.requestCount, queued: newNotifications, sent, files });
-    return { status, kind, runId, requestCount: client.requestCount, counts: snap.meta.counts, changes: cs.stats, queued: newNotifications, sent, ...(files ? { files } : {}) };
-  } finally {
-    await db.releaseLock(sql, LOCK, holder).catch(() => {});
+    snap =
+      kind === "full"
+        ? await extractSnapshot(client, { now, log })
+        : await extractLight(client, { now, log, instructorByCourse: await db.instructorByCourse(sql) });
+  } catch (err) {
+    return await handleFailure(deps, runId, kind, err, now);
   }
+
+  const cs = await buildChangeSet(sql, snap, integ.baselinedKinds, now);
+  const after = await db.getIntegration(sql, PROVIDER);
+  const sessionWarning = sessionExpiryWarning(after?.sessionExpiresAt ?? null, now);
+  if (sessionWarning) cs.changeSet.notifications.push(sessionWarning);
+
+  const { newNotifications } = await db.applyChanges(sql, cs.changeSet);
+  await db.recordSuccess(sql, PROVIDER, { full: kind === "full", baselined: cs.newlyBaselined });
+  const status = snap.meta.warnings.length ? "partial" : "success";
+  await db.finishRun(sql, runId, {
+    status,
+    requestCount: snap.meta.requestCount,
+    counts: snap.meta.counts,
+    changes: cs.stats,
+    notifications: newNotifications,
+    warnings: snap.meta.warnings,
+  });
+
+  // Assignments and exams → projects and tasks. Never fails the sync: the next run retries.
+  let work: WorkSummary | undefined;
+  try {
+    work = await syncWork(sql, now);
+  } catch (err) {
+    log.warn("task sync failed", { error: err });
+  }
+
+  // Files last: alerts are never delayed by downloads, and a download problem never fails the sync.
+  let files: FetchResult | undefined;
+  if (deps.storage) {
+    try {
+      files = await fetchPendingFiles({ sql, client, storage: deps.storage, signedUrls: snap.transient?.signedUrls ?? {}, log, ...(deps.fetch ? { fetch: deps.fetch } : {}) });
+    } catch (err) {
+      log.warn("file fetch failed", { error: err });
+    }
+  }
+  log.info("sync finished", { kind, status, requests: client.requestCount, queued: newNotifications, files, work });
+  return { status, kind, runId, requestCount: client.requestCount, counts: snap.meta.counts, changes: cs.stats, queued: newNotifications, ...(files ? { files } : {}), ...(work ? { work } : {}) };
 }
 
-async function handleFailure(deps: SyncDeps, runId: number, kind: "full" | "light", err: unknown, now: Date, opts: SyncOptions): Promise<SyncSummary> {
+async function handleFailure(deps: SyncDeps, runId: number, kind: "full" | "light", err: unknown, now: Date): Promise<SyncSummary> {
   const { sql, log } = deps;
   const auth = err instanceof MesaAuthError;
   const message = err instanceof Error ? err.message : String(err);
@@ -226,7 +201,6 @@ async function handleFailure(deps: SyncDeps, runId: number, kind: "full" | "ligh
   }
   if (drafts.length) await db.enqueueNotifications(sql, drafts);
   await db.finishRun(sql, runId, { status: "failed", error: message });
-  if (opts.send !== false && deps.channel) await dispatchNotifications(sql, deps.channel, log);
   return { status: "failed", kind, runId, error: message };
 }
 

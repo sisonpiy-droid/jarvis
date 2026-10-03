@@ -2,87 +2,93 @@ import { describe, expect, it, vi } from "vitest";
 import type { Sql } from "@jarvis/db";
 import { runAgent, type Tool } from "../src/agent";
 import { handleUpdate, type BotDeps } from "../src/bot";
-import type { Content, GenerateRequest, ModelProvider } from "../src/gemini";
 import { GeminiProvider } from "../src/gemini";
+import { markdownToChatHtml } from "../src/markdown";
 import { markdownToTelegramHtml, splitForTelegram } from "../src/telegram-format";
 import { istRange, jarvisTools } from "../src/tools";
-
-/** A scripted model: returns the queued replies in order and records every request. */
-function scripted(...replies: Content[]) {
-  const requests: GenerateRequest[] = [];
-  const model: ModelProvider = {
-    async generate(req) {
-      requests.push(structuredClone(req));
-      const r = replies.shift();
-      if (!r) throw new Error("no more scripted replies");
-      return r;
-    },
-  };
-  return { model, requests };
-}
+import { call, calls, say, scripted, text } from "./scripted";
 
 const tool = (name: string, run: Tool["run"]): Tool => ({ name, description: name, parameters: { type: "object", properties: {} }, effect: "read", run });
 
 describe("runAgent", () => {
-  it("runs tools the model asks for, feeds results back, and returns the final text", async () => {
-    const { model, requests } = scripted(
-      { role: "model", parts: [{ functionCall: { name: "get_due", args: { days: 3 } }, thoughtSignature: "sig-1" }] },
-      { role: "model", parts: [{ text: "You have 1 thing due." }] },
-    );
+  it("runs tools the model asks for, feeds results back under the call's id, and returns the final text", async () => {
+    const { model, requests } = scripted(calls(call("get_due", { days: 3 }, "c-1")), say("You have 1 thing due."));
     const run = vi.fn(async () => [{ title: "Case" }]);
-    const res = await runAgent({ model, system: "sys", history: [], user: [{ text: "what's due?" }], tools: [tool("get_due", run)] });
+    const res = await runAgent({ model, system: "sys", history: [], user: [text("what's due?")], tools: [tool("get_due", run)] });
     expect(run).toHaveBeenCalledWith({ days: 3 });
     expect(res.text).toBe("You have 1 thing due.");
-    // The second request carries the model's call verbatim (thought signature intact) and the tool result.
-    const second = requests[1]!.contents;
-    expect(second[1]!.parts[0]!.thoughtSignature).toBe("sig-1");
-    expect(second[2]!.parts[0]!.functionResponse).toEqual({ name: "get_due", response: { result: [{ title: "Case" }] } });
+    const second = requests[1]!.messages;
+    expect(second.map((m) => m.role)).toEqual(["user", "assistant", "tool"]);
+    expect(second[2]!.parts).toEqual([{ type: "tool_result", id: "c-1", name: "get_due", result: [{ title: "Case" }] }]);
     expect(requests[0]!.tools.map((t) => t.name)).toEqual(["get_due"]);
+    expect(res.toolResults).toEqual([{ name: "get_due", ok: true, result: [{ title: "Case" }] }]);
+    expect(res.turns.map((m) => m.role)).toEqual(["user", "assistant", "tool", "assistant"]);
   });
 
   it("reports tool errors to the model instead of crashing", async () => {
-    const { model, requests } = scripted(
-      { role: "model", parts: [{ functionCall: { name: "boom" } }, { functionCall: { name: "nope" } }] },
-      { role: "model", parts: [{ text: "Sorry, that failed." }] },
-    );
-    const res = await runAgent({ model, system: "", history: [], user: [{ text: "x" }], tools: [tool("boom", async () => { throw new Error("db down"); })] });
-    const responses = requests[1]!.contents[2]!.parts.map((p) => p.functionResponse!.response);
-    expect(responses).toEqual([{ error: "db down" }, { error: "unknown tool nope" }]);
+    const { model, requests } = scripted(calls(call("boom", {}, "c-1"), call("nope", {}, "c-2")), say("Sorry, that failed."));
+    const res = await runAgent({ model, system: "", history: [], user: [text("x")], tools: [tool("boom", async () => { throw new Error("db down"); })] });
+    expect(requests[1]!.messages[2]!.parts).toEqual([
+      { type: "tool_result", id: "c-1", name: "boom", error: "db down" },
+      { type: "tool_result", id: "c-2", name: "nope", error: "unknown tool nope" },
+    ]);
     expect(res.toolCalls).toEqual([{ name: "boom", ok: false }, { name: "nope", ok: false }]);
+    expect(res.toolResults).toEqual([{ name: "boom", ok: false, error: "db down" }, { name: "nope", ok: false, error: "unknown tool nope" }]);
+  });
+
+  it("caps huge tool results and says so", async () => {
+    const { model, requests } = scripted(calls(call("big")), say("ok"));
+    await runAgent({ model, system: "", history: [], user: [text("x")], tools: [tool("big", async () => "x".repeat(40_000))] });
+    const r = requests[1]!.messages[2]!.parts[0] as { result: { truncated: boolean; partial: string } };
+    expect(r.result.truncated).toBe(true);
+    expect(r.result.partial).toHaveLength(30_000);
   });
 
   it("stops after the step limit", async () => {
-    const loop = { role: "model" as const, parts: [{ functionCall: { name: "t" } }] };
+    const loop = calls(call("t"));
     const { model } = scripted(loop, loop, loop);
-    const res = await runAgent({ model, system: "", history: [], user: [{ text: "x" }], tools: [tool("t", async () => 1)], maxSteps: 3 });
+    const res = await runAgent({ model, system: "", history: [], user: [text("x")], tools: [tool("t", async () => 1)], maxSteps: 3 });
     expect(res.text).toMatch(/more steps/);
+    expect(res.turns[res.turns.length - 1]!.role).toBe("tool");
   });
 
-  it("ignores thought parts in the final text", async () => {
-    const { model } = scripted({ role: "model", parts: [{ text: "thinking…", thought: true }, { text: "Answer." }] });
-    expect((await runAgent({ model, system: "", history: [], user: [{ text: "x" }], tools: [] })).text).toBe("Answer.");
+  it("ignores thinking parts in the final text", async () => {
+    const { model } = scripted({ role: "assistant", parts: [{ type: "thinking", text: "thinking…" }, text("Answer.")] });
+    expect((await runAgent({ model, system: "", history: [], user: [text("x")], tools: [] })).text).toBe("Answer.");
+  });
+
+  it("passes history first and toolChoice through", async () => {
+    const { model, requests } = scripted(say("Hi again."));
+    const history = [{ role: "user" as const, parts: [text("hi")] }, say("Hello.")];
+    await runAgent({ model, system: "", history, user: [text("again")], tools: [], toolChoice: "none" });
+    expect(requests[0]!.messages.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(requests[0]!.toolChoice).toBe("none");
   });
 });
 
 describe("GeminiProvider", () => {
-  it("sends the key in a header, never the URL, and returns parts", async () => {
+  it("sends the key in a header, never the URL, and returns a neutral assistant message", async () => {
     let seen: { url: string; init: RequestInit } | null = null;
     const f = (async (url: string, init: RequestInit) => {
       seen = { url, init };
       return Response.json({ candidates: [{ content: { role: "model", parts: [{ text: "hi" }] } }] });
     }) as unknown as typeof fetch;
-    const out = await new GeminiProvider("KEY123", "gemini-x", f).generate({ system: "s", contents: [], tools: [] });
-    expect(out.parts).toEqual([{ text: "hi" }]);
+    const out = await new GeminiProvider("KEY123", "gemini-x", f).generate({ system: "s", messages: [], tools: [] });
+    expect(out).toEqual({ role: "assistant", parts: [{ type: "text", text: "hi" }] });
     expect(seen!.url).not.toContain("KEY123");
     expect(new Headers(seen!.init.headers).get("x-goog-api-key")).toBe("KEY123");
   });
   it("surfaces API errors without echoing the key", async () => {
     const f = (async () => Response.json({ error: { message: "quota exceeded" } }, { status: 429 })) as unknown as typeof fetch;
-    await expect(new GeminiProvider("KEY123", "m", f).generate({ system: "", contents: [], tools: [] })).rejects.toThrow(/429: quota exceeded/);
+    await expect(new GeminiProvider("KEY123", "m", f).generate({ system: "", messages: [], tools: [] })).rejects.toThrow(/429: quota exceeded/);
   });
 });
 
-describe("telegram formatting", () => {
+describe("chat formatting", () => {
+  it("is one converter for every surface (Telegram re-exports the chat one)", () => {
+    expect(markdownToTelegramHtml).toBe(markdownToChatHtml);
+    expect(markdownToChatHtml("<script>x</script> **ok**")).toBe("&lt;script&gt;x&lt;/script&gt; <b>ok</b>");
+  });
   it("escapes HTML and converts common Markdown", () => {
     expect(markdownToTelegramHtml("**Due** <soon> & *today*\n- one\n- [LMS](https://x.y/a?b=1)")).toBe(
       '<b>Due</b> &lt;soon&gt; &amp; <i>today</i>\n• one\n• <a href="https://x.y/a?b=1">LMS</a>',

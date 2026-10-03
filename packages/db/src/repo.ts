@@ -1,4 +1,5 @@
 import type { Sql, Tx } from "./client";
+import { notificationMeta } from "./notification-meta";
 
 // Thin, explicit SQL. Every write here is idempotent: re-running a sync over
 // unchanged data only bumps last_seen_at.
@@ -40,6 +41,8 @@ export interface NotificationDraft {
   scheduledFor: string;
   /** Recorded but never sent — reserves the dedupe key (e.g. a reminder made redundant by a "new assignment" alert). */
   suppressed?: boolean;
+  /** Dashboard deep link; derived from the dedupe key when omitted. */
+  url?: string;
 }
 
 export interface Integration {
@@ -179,9 +182,10 @@ export async function applyChanges(sql: Sql, cs: ChangeSet): Promise<{ newNotifi
     }
     let newNotifications = 0;
     for (const n of cs.notifications) {
+      const meta = notificationMeta(n.dedupeKey);
       const rows = await tx`
-        insert into jarvis.notifications (dedupe_key, priority, text, scheduled_for, status)
-        values (${n.dedupeKey}, ${n.priority}, ${n.text}, ${n.scheduledFor}, ${n.suppressed ? "suppressed" : "queued"})
+        insert into jarvis.notifications (dedupe_key, priority, text, scheduled_for, status, category, url)
+        values (${n.dedupeKey}, ${n.priority}, ${n.text}, ${n.scheduledFor}, ${n.suppressed ? "suppressed" : "queued"}, ${meta.category}, ${n.url ?? meta.url})
         on conflict (dedupe_key) do nothing
         returning id`;
       if (rows.length && !n.suppressed) newNotifications++;

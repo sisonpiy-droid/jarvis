@@ -15,7 +15,7 @@ export function DraftButton({ assignmentId }: { assignmentId: string }) {
       }}
       className="rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
     >
-      {state === "started" ? "Drafting — it'll arrive on Telegram and here in ~1–3 min" : state === "busy" ? "Starting…" : state === "error" ? "Failed — try again" : "✍️ Draft with JARVIS"}
+      {state === "started" ? "Drafting — you'll get a notification and it appears here in ~1–3 min" : state === "busy" ? "Starting…" : state === "error" ? "Failed — try again" : "✍️ Draft with JARVIS"}
     </button>
   );
 }

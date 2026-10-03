@@ -1,5 +1,9 @@
+import * as db from "@jarvis/db";
 import type { Sql } from "@jarvis/db";
 import type { Tool } from "./agent";
+import { goalTools } from "./goal-tools";
+import { planningTools } from "./planning-tools";
+import { workTools } from "./work-tools";
 
 // JARVIS's tools over the database. Small, typed, bounded outputs: the model
 // asks for what it needs instead of being handed every record.
@@ -55,9 +59,9 @@ export async function resolveAssignment(sql: Sql, query: string, now: Date = new
 }
 
 export interface ToolOptions {
-  /** Starts drafting an assignment in the background (result arrives on Telegram). */
+  /** Starts drafting an assignment in the background (it appears on the Drafts page; the owner gets a notification). */
   requestDraft?: (assignmentId: string) => Promise<void>;
-  /** Saves a standing instruction for an assignment and re-does it (result arrives on Telegram). */
+  /** Saves a standing instruction for an assignment and re-does it (it appears on the Drafts page; the owner gets a notification). */
   requestRevision?: (assignmentId: string, instruction: string) => Promise<void>;
 }
 
@@ -198,6 +202,112 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
       },
     },
     {
+      name: "query_assignments",
+      effect: "read",
+      description:
+        "Filter and COUNT across ALL MESA assignments (past and future): by course / professor / short name, submission status (open = not submitted, submitted, late = submitted late, overdue = not submitted and past due), and due-date range. Returns exact totals, a breakdown (by course, professor or status) and the matching list. Use this for any counting, comparison or 'which/how many' question instead of adding up partial lists.",
+      parameters: obj({
+        course: { type: "string", description: "Optional course words, short name (DDDM) or professor name" },
+        status: { type: "string", enum: ["all", "open", "submitted", "late", "overdue"], description: "Default all" },
+        due_from: { type: "string", description: "Optional YYYY-MM-DD (IST), inclusive" },
+        due_to: { type: "string", description: "Optional YYYY-MM-DD (IST), inclusive" },
+        group_by: { type: "string", enum: ["course", "professor", "status", "none"], description: "Breakdown to return (default course)" },
+      }),
+      async run(a) {
+        const course = str(a.course).replace(/^(prof\.?|professor|dr\.?)\s+/i, "");
+        const status = (["all", "open", "submitted", "late", "overdue"] as const).find((s) => s === a.status) ?? "all";
+        const day = (v: unknown, end: boolean) => {
+          const s = str(v);
+          if (!s) return null;
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) throw new Error("dates must be YYYY-MM-DD");
+          return istRange(s, 1, now())[end ? "to" : "from"];
+        };
+        const from = day(a.due_from, false);
+        const to = day(a.due_to, true);
+        const t = now().toISOString();
+        const words = course ? titleWords(course) : null;
+        const rows = await sql`
+          select i.source_id, i.title, i.sort_at, i.data, c.data ->> 'instructor' as professor, c.data ->> 'shortName' as short
+            from jarvis.lms_items i
+            left join jarvis.lms_items c on c.kind = 'course' and c.source_id = i.course_id
+           where i.kind = 'assignment' and i.removed_at is null
+             ${words ? sql`and (coalesce(i.data ->> 'courseTitle', '') ilike all(${words}) or coalesce(c.data ->> 'instructor', '') ilike all(${words}) or c.data ->> 'shortName' ilike ${course})` : sql``}
+             ${from ? sql`and i.sort_at >= ${from}` : sql``}
+             ${to ? sql`and i.sort_at < ${to}` : sql``}
+           order by i.sort_at nulls last`;
+        const statusOf = (d: Record<string, unknown>, due: string | null) => {
+          const s = String(d.submissionStatus ?? "");
+          if (s === "submitted_late") return "late";
+          if (s.startsWith("submitted")) return "submitted";
+          return due && due < t ? "overdue" : "open";
+        };
+        const all = rows.map((r) => {
+          const due = r.sort_at instanceof Date ? r.sort_at.toISOString() : (r.sort_at as string | null);
+          return { id: String(r.source_id), title: String(r.title), course: (r.data.courseTitle as string | null) ?? null, professor: (r.professor as string | null) ?? (r.data.instructor as string | null) ?? null, due: (r.data.dueAtIst as string | null) ?? fmt(due), status: statusOf(r.data, due) };
+        });
+        const matched = all.filter((x) => status === "all" || x.status === status || (status === "open" && x.status === "overdue"));
+        const key = (["course", "professor", "status", "none"] as const).find((g) => g === a.group_by) ?? "course";
+        const breakdown: Record<string, number> = {};
+        if (key !== "none") for (const x of matched) breakdown[String(x[key] ?? "unknown")] = (breakdown[String(x[key] ?? "unknown")] ?? 0) + 1;
+        return {
+          total: matched.length,
+          ...(key !== "none" ? { [`by_${key}`]: Object.fromEntries(Object.entries(breakdown).sort((p, q) => q[1] - p[1])) } : {}),
+          assignments: matched.slice(0, 80),
+          ...(matched.length > 80 ? { note: `${matched.length - 80} more not listed; totals above are complete` } : {}),
+        };
+      },
+    },
+    {
+      name: "get_course",
+      effect: "read",
+      description:
+        "Everything about one MESA course, found by course name, short name (e.g. DDDM) or the professor's name (e.g. 'Vinay'): instructor, classes held so far and upcoming, recordings, materials by folder (session workbooks, pre-reads, outlines — with file_id to read their text), and assignments with deadlines and status. Use for 'what has <professor> taught', 'what did we cover in <course>', 'what's left in <course>'.",
+      parameters: obj({ query: { type: "string", description: "Course name words, short name, or professor name" } }, ["query"]),
+      async run(a) {
+        const q = str(a.query).replace(/^(prof\.?|professor|dr\.?)\s+/i, "");
+        if (q.length < 2) throw new Error("query is required");
+        const courses = await sql`
+          select source_id, title, data from jarvis.lms_items
+           where kind = 'course' and removed_at is null
+             and (title ilike all(${titleWords(q)}) or data ->> 'shortName' ilike ${q} or data ->> 'instructor' ilike all(${titleWords(q)}))
+           order by title limit 6`;
+        if (!courses.length) return { found: false, hint: "No course matches; try search_lms with the same words." };
+        if (courses.length > 1) return { found: "multiple", candidates: courses.map((c) => ({ course: c.title, short: c.data.shortName, instructor: c.data.instructor })) };
+        const c = courses[0]!;
+        const t = now().toISOString();
+        const [events, recordings, materials, assignments] = await Promise.all([
+          sql`select title, sort_at, data from jarvis.lms_items where kind = 'event' and course_id = ${c.source_id} and removed_at is null order by sort_at`,
+          sql`select title, sort_at from jarvis.lms_items where kind = 'recording' and course_id = ${c.source_id} and removed_at is null order by sort_at`,
+          sql`
+            select m.title, m.sort_at, m.data ->> 'topicTitle' as folder, x.sha256, x.text_status
+              from jarvis.lms_items m
+              left join jarvis.item_files f on f.kind = 'material' and f.item_id = m.source_id
+              left join jarvis.files x on x.sha256 = f.sha256
+             where m.kind = 'material' and m.course_id = ${c.source_id} and m.removed_at is null
+             order by m.sort_at nulls last limit 80`,
+          sql`select source_id, title, data from jarvis.lms_items where kind = 'assignment' and course_id = ${c.source_id} and removed_at is null order by sort_at nulls last`,
+        ]);
+        const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : (v as string | null));
+        const session = (e: (typeof events)[number]) => ({ when: e.data.startAtIst ?? fmt(iso(e.sort_at)), title: e.title, type: e.data.eventType, status: e.data.status, about: short(e.data.descriptionText, 300) });
+        const folders: Record<string, Array<{ title: string; date: string | null; file_id?: string; has_text: boolean }>> = {};
+        for (const m of materials) (folders[String(m.folder ?? "Other")] ??= []).push({ title: String(m.title), date: fmt(iso(m.sort_at)), ...(m.sha256 ? { file_id: String(m.sha256) } : {}), has_text: m.text_status === "done" });
+        return {
+          course: c.title,
+          short: c.data.shortName,
+          instructor: c.data.instructor,
+          term: c.data.termName,
+          about: short(c.data.descriptionText, 600),
+          url: c.data.sourceUrl,
+          classes_held: events.filter((e) => iso(e.sort_at)! < t).map(session),
+          classes_upcoming: events.filter((e) => iso(e.sort_at)! >= t).map(session),
+          recordings: recordings.map((r) => ({ title: r.title, date: fmt(iso(r.sort_at)) })),
+          materials_by_folder: folders,
+          assignments: assignments.map((x) => ({ id: x.source_id, title: x.title, due: x.data.dueAtIst, status: x.data.submissionStatus })),
+          hint: "Session titles, recordings, workbooks and assignment case names show what was taught; read an outline or workbook with read_file_text(file_id) for detail.",
+        };
+      },
+    },
+    {
       name: "read_file_text",
       effect: "read",
       description: "Extracted text of a downloaded Word/PowerPoint/Excel file (by file_id from other tools). PDFs are stored as originals and have no text here.",
@@ -212,15 +322,28 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
     {
       name: "get_announcements",
       effect: "read",
-      description: "Recent MESA announcements (newest first), optionally filtered by words.",
-      parameters: obj({ query: { type: "string" }, limit: { type: "integer", description: "default 5, max 15" } }),
+      description:
+        "MESA announcements, newest first. Filter by look-back window (days) and by keywords — an announcement matches if it contains ANY of the keywords (e.g. ['exam','viva','deadline','postponed']). Returns the total that matched as well as the items.",
+      parameters: obj({
+        keywords: { type: "array", items: { type: "string" }, description: "Optional; matches any of them in the title or text" },
+        query: { type: "string", description: "Optional single phrase (older form of keywords)" },
+        days: { type: "integer", description: "Look-back window in days (default: no limit, max 365)" },
+        limit: { type: "integer", description: "default 10, max 30" },
+      }),
       async run(a) {
-        const q = str(a.query);
-        const limit = clampInt(a.limit, 1, 15, 5);
-        const rows = q
-          ? await sql`select data from jarvis.lms_items where kind = 'announcement' and (title ilike ${like(q)} or data ->> 'bodyText' ilike ${like(q)}) order by sort_at desc limit ${limit}`
-          : await sql`select data from jarvis.lms_items where kind = 'announcement' order by sort_at desc limit ${limit}`;
-        return rows.map(({ data: d }) => ({ title: d.title, from: d.author, course: d.courseName, posted: fmt(d.createdAt), text: short(d.bodyText, 1200), attachments: (d.attachments ?? []).map((x: { fileName?: string }) => x.fileName) }));
+        const kws = [...(Array.isArray(a.keywords) ? a.keywords : []), a.query].map(str).filter((k) => k.length > 1).slice(0, 12);
+        const limit = clampInt(a.limit, 1, 30, 10);
+        const since = a.days != null ? new Date(now().getTime() - clampInt(a.days, 1, 365, 14) * 86_400_000).toISOString() : null;
+        const rows = await sql`
+          select data, count(*) over () as total from jarvis.lms_items
+           where kind = 'announcement' and removed_at is null
+             ${since ? sql`and sort_at >= ${since}` : sql``}
+             ${kws.length ? sql`and (title ilike any(${kws.map(like)}) or coalesce(data ->> 'bodyText', '') ilike any(${kws.map(like)}))` : sql``}
+           order by sort_at desc limit ${limit}`;
+        return {
+          total: Number(rows[0]?.total ?? 0),
+          announcements: rows.map(({ data: d }) => ({ title: d.title, from: d.author, course: d.courseName, posted: fmt(d.createdAt), text: short(d.bodyText, 1200), attachments: (d.attachments ?? []).map((x: { fileName?: string }) => x.fileName) })),
+        };
       },
     },
     {
@@ -258,11 +381,11 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
     {
       name: "create_reminder",
       effect: "write-local",
-      description: "Schedule a Telegram reminder to the user (only to the user). Delivered within ~5 minutes of the requested time.",
+      description: "Schedule a reminder notification to the owner (inbox and push). Delivered within ~5 minutes of the requested time.",
       parameters: obj(
         {
           text: { type: "string", description: "What to remind about" },
-          at: { type: "string", description: "When, as an ISO 8601 timestamp with timezone (the user is in IST, +05:30)" },
+          at: { type: "string", description: "When, as an ISO 8601 timestamp with timezone (the owner is in IST, +05:30)" },
         },
         ["text", "at"],
       ),
@@ -275,12 +398,15 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
         if (at < t - 60_000) throw new Error("that time is in the past");
         if (at > t + 366 * 86_400_000) throw new Error("reminders can be at most a year ahead");
         const esc = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        await sql`
-          insert into jarvis.notifications (dedupe_key, priority, text, scheduled_for)
-          values (${`user.reminder:${crypto.randomUUID()}`}, 'high', ${`⏰ <b>Reminder</b>\n${esc}`}, ${new Date(at).toISOString()})`;
-        return { scheduled_for: fmt(new Date(at).toISOString()) };
+        // Through the normal queue: category 'reminder' (from the user.* key), routed to the inbox and push.
+        const scheduledFor = new Date(at).toISOString();
+        await db.enqueueNotifications(sql, [{ dedupeKey: `user.reminder:${crypto.randomUUID()}`, priority: "high", text: `⏰ <b>Reminder</b>\n${esc}`, scheduledFor, url: "/inbox" }]);
+        return { scheduled_for: fmt(scheduledFor), scheduled_for_iso: scheduledFor };
       },
     },
+    ...workTools(sql, now),
+    ...goalTools(sql, now),
+    ...planningTools(sql, now),
   ];
   if (opts.requestDraft) {
     const requestDraft = opts.requestDraft;
@@ -288,14 +414,14 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
       name: "draft_assignment",
       effect: "write-local",
       description:
-        "Start writing a full first draft of an assignment (reads the original brief, attachments and class slides). The Word document arrives on Telegram in 1–3 minutes. Use when the user asks you to do, draft, write or solve an assignment.",
+        "Start writing a full first draft of an assignment (reads the original brief, attachments and class slides). In 1–3 minutes the Word document appears on the Drafts page; you'll get a notification. Use when the owner asks you to do, draft, write or solve an assignment.",
       parameters: obj({ query: { type: "string", description: "Assignment id or words from its title" } }, ["query"]),
       async run(a) {
         const r = await resolveAssignment(sql, str(a.query), now());
         if ("none" in r) return { started: false, reason: "no matching assignment" };
         if ("candidates" in r) return { started: false, reason: "several match — ask which one", candidates: r.candidates };
         await requestDraft(String(r.one.sourceId));
-        return { started: true, assignment: r.one.title, note: "The draft will arrive as a Word document on Telegram in 1–3 minutes." };
+        return { started: true, assignment: r.one.title, note: "In 1–3 minutes the draft (a Word document) appears on the Drafts page; you'll get a notification." };
       },
     });
   }
@@ -305,11 +431,11 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
       name: "revise_assignment",
       effect: "write-local",
       description:
-        "Change or correct an assignment JARVIS is doing: pass the student's instruction (e.g. 'our startup is Snitch', 'use Pune not Delhi', 'make the recommendation shorter', 'add a slide on pricing'). It is remembered for that assignment and the deliverables are redone (arrive on Telegram in 1–3 min). Use whenever the student gives information or feedback about a specific assignment's draft.",
+        "Change or correct an assignment JARVIS is doing: pass the owner's instruction (e.g. 'our startup is Snitch', 'use Pune not Delhi', 'make the recommendation shorter', 'add a slide on pricing'). It is remembered for that assignment and the deliverables are redone (in 1–3 min they appear on the Drafts page; you'll get a notification). Use whenever the owner gives information or feedback about a specific assignment's draft.",
       parameters: obj(
         {
           query: { type: "string", description: "Assignment id or words from its title" },
-          instruction: { type: "string", description: "The student's instruction, in their words, self-contained" },
+          instruction: { type: "string", description: "The owner's instruction, in their words, self-contained" },
         },
         ["query", "instruction"],
       ),
@@ -320,7 +446,7 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
         if ("none" in r) return { started: false, reason: "no matching assignment" };
         if ("candidates" in r) return { started: false, reason: "several match — ask which one", candidates: r.candidates };
         await requestRevision(String(r.one.sourceId), instruction);
-        return { started: true, assignment: r.one.title, note: "Saved for this assignment; the revised deliverables arrive on Telegram in 1–3 minutes." };
+        return { started: true, assignment: r.one.title, note: "Saved for this assignment. In 1–3 minutes the revised deliverables appear on the Drafts page; you'll get a notification." };
       },
     });
   }
