@@ -5,7 +5,134 @@ and working life runs on, turns them into one structured, current picture,
 tells you what matters, and acts on your instructions. Anything that can't
 be undone needs your explicit approval.
 
-This document describes the target system and marks what exists today.
+**Start with §0. It describes what is actually built** (checked against the code in October 2026, during V2 Phase 0).
+§1–§11 are the original V1 design document and are kept for history. Where they disagree with §0, §0 is right.
+
+## 0. As built (October 2026)
+
+```
+MESA REST API (read-only MesaClient; cookie → 15-min JWT)   Google Calendar (private iCal URL, read)
+          │                                                            │
+pg_cron ── one entry per job ──► Edge Function `jarvis-tick?job=<name>` (Supabase, Deno)
+   mesa (5 min)      extract → diff → rules → one atomic write; deadline reminders; MESA → tasks/projects; file downloads
+   calendar (5 min)  iCal diff → moved/cancelled alerts and 30-min heads-ups
+   notify (1 min)    route to the inbox; push / email / Telegram per preferences, quiet hours, caps, escalation
+   briefs (15 min)   daily brief 08:00–12:00 IST: facts, focus note (≤1 AI call), stored in `briefs`, inbox + push
+   drafts (10 min)   assignment backlog → Vercel /api/jobs/deliver
+   habits (5 min)    habit check-in reminders (push with Done / Skip buttons)
+   engine (5 min)    goal risk / neglect, slipping habits, task due reminders — each alert once per period;
+                     one-time nudge to review old goal/project memories
+   health (15 min)   stale/failing jobs; prunes job history after 30 days
+          │  each job: own lease lock (jarvis.locks), heartbeat (jarvis.jobs), history (jarvis.job_runs)
+          ▼
+Supabase Postgres, schema `jarvis` — RLS on, no policies, server-side access only. Migrations 0001–0019
+  (0018 and 0019 are Phases 5–6, built but not yet applied live).
+          │
+Vercel Next.js dashboard (apps/web, installable PWA): command center (/), tasks, projects, goals and habits, inbox, assignments,
+  drafts, classes, chat (web transcript), settings (notifications, devices, passkeys, memory), status (job health),
+  private ICS feed of MESA classes (/cal), deliverables job (/api/jobs/deliver, docx/xlsx/pptx via Gemini)
+Edge `telegram-bot`: owner-only chat (Gemini, tool-calling) and commands — legacy, removed in V2 Phase 11
+Edge `mesa-sync`: all jobs in one call (Telegram /sync, manual runs); `npm run sync:mesa` does the same locally
+```
+
+**Packages** (all TypeScript, exported as source):
+
+| Package | What it holds |
+|---|---|
+| `shared` | secret-box (AES-256-GCM), hashing, redacting logger, env loading |
+| `mesa` | auth, client, extract, normalize; `login.ts` (Playwright, Node only) |
+| `db` | postgres.js client, repository, job health, notifications, passkeys, tasks/projects (`work.ts`), goals/habits (`goals.ts`, pure maths in `progress.ts`), risk/neglect (`risk.ts`, `attention.ts`), focus score and free time (`focus.ts`), the one facts loader (`brief-facts.ts`: `loadBriefFacts`, `briefSections`, stored briefs), migrations; `test/harness.ts` (PGlite) |
+| `sync` | diff, rules, time, brief renderer (`brief.ts`), calendar, `run.ts` (`mesaSync`), `jobs.ts` (job runner, schedules), `work.ts` (MESA → tasks/projects), `engine.ts` |
+| `notify` | notification service: policy, rendering, Web Push (RFC 8291/8292), email (Resend), Telegram (legacy) |
+| `files` | Storage, Office text extraction |
+| `calendar` | iCal reader, ICS feed writer |
+| `ai` | provider-neutral model types (`model.ts`) and the Gemini adapter, agent loop, chat history (`history.ts`), tools (LMS, tasks, projects, goals, habits, planning), scoped memory, grounding checker and chat guard, focus note, Markdown → chat HTML, Telegram bot (legacy) |
+| `assist` | v1 docx drafts (legacy) |
+| `deliver` | v2 deliverables |
+
+**Not built yet** (planned in V2), even where §1–§11 mention them:
+- pg-boss, Drizzle, Supabase Auth, OpenAI;
+- `user_id` columns (JARVIS stays single-owner by decision);
+- `pending_actions` / approvals;
+- pgvector or pg_trgm memory search (memory search is ILIKE word matching);
+- a people table (person memories are keyed by normalised name until Phase 10);
+- Gmail and Google OAuth;
+- weekly and monthly reviews and approvals (Phases 7–8).
+
+### Phases 5–6 as built (tested, not yet deployed)
+
+**One facts loader.** `db.loadBriefFacts(sql, now)` reads everything the day needs in one batch: open
+tasks (and today's done count), projects with their next action, MESA assignments due, the calendar (MESA classes plus
+the personal iCal feed), goals and habits with their risk, slipping habits, the MESA integration's health and the
+unread count. It also ranks the focus list (`focus.ts`: integer points for priority, IST due bucket, goal link, neglect and effort against today's free
+time, each part with a human reason). `briefSections(facts)` cuts it into priorities, upcoming, personal, goals and
+risks. The brief, the command center and the chat tools `get_focus` / `get_attention` all read this one loader,
+so they cannot disagree.
+
+**Daily brief.**
+```
+briefs job (every 15 min) ── before 08:00 IST: idle · brief:<day> already queued: idle
+   │                         MESA data older than 30 min: wait until 10:00, then send with a stale-data risk line
+   │                         after 12:00: idle (missedWindow) — a late morning brief is skipped, not sent
+   ▼
+loadBriefFacts → briefSections → focus note → renderBrief (≤3,500 chars, sections trimmed line by line)
+   │   focus note: reuse briefs.note if today's row exists, else ONE model call (JSON, no tools, 20 s)
+   ▼
+jarvis.briefs (kind 'daily', day, lines[] each with the source rows it came from, text, note + note_source/detail/refs)
+   + notification `brief:<day>` (category 'brief'): inbox, and a push "Your day is ready" outside the hourly cap and digest
+```
+The model never writes a fact in the note. It writes a template that may only use placeholders (`{P1}`, `{P1.due}`,
+`{FREE}`, `{R1}` …) built from the facts; `validateFocusNote` rejects digits, date words, number words, markup, names
+and status claims, and the code substitutes the real values. Any failure (no key, `BRIEF_AI=off`, timeout, invalid
+reply) falls back to a fixed template over the same placeholders, recorded in `note_detail`
+(`no_model` | `no_facts` | `error:<msg>` | `invalid:<rule>`). The note is plain text and escaped when rendered.
+
+**Command center (`/`).** A server component over `loadBriefFacts` plus small view helpers in
+`apps/web/lib/command.ts`. Mobile-first order: header (day mode, last LMS check), glance chips (overdue, due today,
+free time, habits, at risk, classes), the focus card, the old-notes review banner, priorities with Done / ⋯ (Move to
+tomorrow, edit with effort), also-today tasks, next 7 days, calendar and a day strip, habits, goals needing attention,
+projects, risks, and LMS changes (streamed in a `<Suspense>` fold). The focus card shows today's stored note
+(`getBrief`); before the brief exists it shows `fallbackFocusNote(facts)`, so the page never calls Gemini.
+
+**Provider-neutral model types (`ai/model.ts`).** Messages are `user | assistant | tool` with typed parts (`text`,
+`thinking`, `tool_call`, `tool_result`, `file`); provider-only data (Gemini thought signatures) rides in `meta` on the
+part it came on. `GeminiProvider` is the only place that knows Gemini's wire shape. Chat history is stored in this
+neutral shape (`chat_messages.format = 'neutral'`); older Gemini-shaped rows are converted on read, never rewritten.
+`sanitizeHistory` drops half-finished tool exchanges and trims old tool results before they reach the model.
+The model's context is the last 24 rows after the channel's latest `marker` row (New conversation). Saves take a
+per-channel advisory lock inside one transaction.
+
+**Scoped memory (`ai/memory.ts`).** Each memory has a scope: `global` (preferences, personal context), `mesa`
+(optionally one course or assignment), `project` (one project id) or `person` (a normalised name until Phase 10).
+For each chat message, `detectMemoryFocus` looks at it and the last two user messages for project titles, course
+names and people, and `loadMemories` fills a 6,000-character block in the order preferences, matching projects,
+matching people, MESA (only when the message is about MESA), personal context, old notes, ending with a
+"(+N more — use search_memory)" footer when anything was left out. `search_memory` is ILIKE word matching. Goals, projects and
+anything dated belong in the database, not memory: the save guard refuses them. Old `goal` / `project` notes from V1
+wait on `/settings/memory`, where the owner turns each into a real goal or project (prefilled form, owner sets the
+target), keeps it as a note, or forgets it; nothing is converted automatically.
+
+**Chat (web and Telegram share `chat()`).**
+```
+message ─► loadHistory(channel) + scoped memories ─► channel-neutral system prompt ─► runAgent (tools)
+        ─► grounding guard: every day, weekday and #id in the answer must appear in the evidence
+             (tool results of this turn and the history, the owner's messages, loaded memory ids)
+             fail → one correction turn (≤3 steps) → still unbacked → footer "Not found in your data: …"
+        ─► saveTurns(channel, turns, meta.guard if it fired) ─► {text, sources (tool names), guard}
+```
+The rejected draft and the correction prompt are never stored. Planning questions route to `get_focus`, `get_week`,
+`get_attention`, `get_accomplished` and `get_commitments`, which read the same facts as the brief. The web chat shows
+only the `web` channel: a paged transcript (`?before=<id>`, older pages read-only), a "New conversation" divider
+(`POST /api/chat {action:'reset'}` writes a marker row), and a caption per answer, `Checked: <sources> · <time>`,
+plus a note when the guard fired. Replies are Markdown rendered by `markdownToChatHtml`, which escapes everything first.
+
+The dashboard signs in with a passkey (recovery codes, `npm run web:login-link` and the legacy Telegram link as fallbacks).
+The V2 plan and its phase status are in [ROADMAP.md](ROADMAP.md).
+
+---
+
+*Original V1 design follows.*
+
 **V1 = MESA LMS → JARVIS → Telegram notifications.**
 
 ## 1. Current project structure

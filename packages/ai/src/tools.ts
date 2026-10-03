@@ -1,5 +1,9 @@
+import * as db from "@jarvis/db";
 import type { Sql } from "@jarvis/db";
 import type { Tool } from "./agent";
+import { goalTools } from "./goal-tools";
+import { planningTools } from "./planning-tools";
+import { workTools } from "./work-tools";
 
 // JARVIS's tools over the database. Small, typed, bounded outputs: the model
 // asks for what it needs instead of being handed every record.
@@ -55,9 +59,9 @@ export async function resolveAssignment(sql: Sql, query: string, now: Date = new
 }
 
 export interface ToolOptions {
-  /** Starts drafting an assignment in the background (result arrives on Telegram). */
+  /** Starts drafting an assignment in the background (it appears on the Drafts page; the owner gets a notification). */
   requestDraft?: (assignmentId: string) => Promise<void>;
-  /** Saves a standing instruction for an assignment and re-does it (result arrives on Telegram). */
+  /** Saves a standing instruction for an assignment and re-does it (it appears on the Drafts page; the owner gets a notification). */
   requestRevision?: (assignmentId: string, instruction: string) => Promise<void>;
 }
 
@@ -258,11 +262,11 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
     {
       name: "create_reminder",
       effect: "write-local",
-      description: "Schedule a Telegram reminder to the user (only to the user). Delivered within ~5 minutes of the requested time.",
+      description: "Schedule a reminder notification to the owner (inbox and push). Delivered within ~5 minutes of the requested time.",
       parameters: obj(
         {
           text: { type: "string", description: "What to remind about" },
-          at: { type: "string", description: "When, as an ISO 8601 timestamp with timezone (the user is in IST, +05:30)" },
+          at: { type: "string", description: "When, as an ISO 8601 timestamp with timezone (the owner is in IST, +05:30)" },
         },
         ["text", "at"],
       ),
@@ -275,12 +279,15 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
         if (at < t - 60_000) throw new Error("that time is in the past");
         if (at > t + 366 * 86_400_000) throw new Error("reminders can be at most a year ahead");
         const esc = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        await sql`
-          insert into jarvis.notifications (dedupe_key, priority, text, scheduled_for)
-          values (${`user.reminder:${crypto.randomUUID()}`}, 'high', ${`⏰ <b>Reminder</b>\n${esc}`}, ${new Date(at).toISOString()})`;
-        return { scheduled_for: fmt(new Date(at).toISOString()) };
+        // Through the normal queue: category 'reminder' (from the user.* key), routed to the inbox and push.
+        const scheduledFor = new Date(at).toISOString();
+        await db.enqueueNotifications(sql, [{ dedupeKey: `user.reminder:${crypto.randomUUID()}`, priority: "high", text: `⏰ <b>Reminder</b>\n${esc}`, scheduledFor, url: "/inbox" }]);
+        return { scheduled_for: fmt(scheduledFor), scheduled_for_iso: scheduledFor };
       },
     },
+    ...workTools(sql, now),
+    ...goalTools(sql, now),
+    ...planningTools(sql, now),
   ];
   if (opts.requestDraft) {
     const requestDraft = opts.requestDraft;
@@ -288,14 +295,14 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
       name: "draft_assignment",
       effect: "write-local",
       description:
-        "Start writing a full first draft of an assignment (reads the original brief, attachments and class slides). The Word document arrives on Telegram in 1–3 minutes. Use when the user asks you to do, draft, write or solve an assignment.",
+        "Start writing a full first draft of an assignment (reads the original brief, attachments and class slides). In 1–3 minutes the Word document appears on the Drafts page; you'll get a notification. Use when the owner asks you to do, draft, write or solve an assignment.",
       parameters: obj({ query: { type: "string", description: "Assignment id or words from its title" } }, ["query"]),
       async run(a) {
         const r = await resolveAssignment(sql, str(a.query), now());
         if ("none" in r) return { started: false, reason: "no matching assignment" };
         if ("candidates" in r) return { started: false, reason: "several match — ask which one", candidates: r.candidates };
         await requestDraft(String(r.one.sourceId));
-        return { started: true, assignment: r.one.title, note: "The draft will arrive as a Word document on Telegram in 1–3 minutes." };
+        return { started: true, assignment: r.one.title, note: "In 1–3 minutes the draft (a Word document) appears on the Drafts page; you'll get a notification." };
       },
     });
   }
@@ -305,11 +312,11 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
       name: "revise_assignment",
       effect: "write-local",
       description:
-        "Change or correct an assignment JARVIS is doing: pass the student's instruction (e.g. 'our startup is Snitch', 'use Pune not Delhi', 'make the recommendation shorter', 'add a slide on pricing'). It is remembered for that assignment and the deliverables are redone (arrive on Telegram in 1–3 min). Use whenever the student gives information or feedback about a specific assignment's draft.",
+        "Change or correct an assignment JARVIS is doing: pass the owner's instruction (e.g. 'our startup is Snitch', 'use Pune not Delhi', 'make the recommendation shorter', 'add a slide on pricing'). It is remembered for that assignment and the deliverables are redone (in 1–3 min they appear on the Drafts page; you'll get a notification). Use whenever the owner gives information or feedback about a specific assignment's draft.",
       parameters: obj(
         {
           query: { type: "string", description: "Assignment id or words from its title" },
-          instruction: { type: "string", description: "The student's instruction, in their words, self-contained" },
+          instruction: { type: "string", description: "The owner's instruction, in their words, self-contained" },
         },
         ["query", "instruction"],
       ),
@@ -320,7 +327,7 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
         if ("none" in r) return { started: false, reason: "no matching assignment" };
         if ("candidates" in r) return { started: false, reason: "several match — ask which one", candidates: r.candidates };
         await requestRevision(String(r.one.sourceId), instruction);
-        return { started: true, assignment: r.one.title, note: "Saved for this assignment; the revised deliverables arrive on Telegram in 1–3 minutes." };
+        return { started: true, assignment: r.one.title, note: "Saved for this assignment. In 1–3 minutes the revised deliverables appear on the Drafts page; you'll get a notification." };
       },
     });
   }

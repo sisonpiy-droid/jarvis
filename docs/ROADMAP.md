@@ -1,5 +1,82 @@
 # Roadmap
 
+## V2 — personal operating system (approved October 2026)
+
+The full plan covers architecture, data model, phases and risks. Decisions:
+- single owner, with no `user_id`;
+- Target folded into Goal;
+- MESA stays on its REST API, with Playwright only for sign-in;
+- Gemini free tier behind a provider-neutral layer;
+- passkey login;
+- push to Android and iPhone;
+- Gmail for personal and MESA accounts;
+- Telegram kept for rollback until Phase 11, then removed only with explicit approval.
+
+| # | Phase | Status |
+|---|---|---|
+| 0 | Foundations: job health (`jobs`, `job_runs`, `settings`), one pg_cron entry per job via `jarvis-tick`, PGlite database tests, docs in line with the code, Google OAuth feasibility | ✅ live 2026-10-01 |
+| 1 | Leave Telegram: notification service (routing, quiet hours, caps, escalation, digests), in-app inbox, installable PWA, web push (Android + iPhone), email (Resend), passkeys + recovery codes; Telegram optional (fallback/mirror/off) | ✅ live 2026-10-01 (closed by owner; Android/iPhone push still to be confirmed on device — Telegram covers alerts until then) |
+| 2 | Tasks and projects: `projects`, `project_items`, `tasks` (0015); MESA assignments → project + “Submit” task (+ “Review the JARVIS draft”), exams → project + “Prepare for” task, closed/cancelled from LMS changes; /tasks, /projects, Today; chat tools | ✅ live 2026-10-01 |
+| 3 | Goals, habits, activity: `goals` (target folded in), `habits` (daily / weekdays / N× per week or month), `activities` log (0016); progress, streaks and misses derived in IST (`progress.ts`); /goals, goal detail, Today habits, one-tap /q/habit check-in; `habits` job sends reminders with Done / Skip push buttons; completed linked tasks count toward goals; chat tools | ✅ live 2026-10-01 |
+| 4 | Progress, risk and neglect engine: pace-based risk (on track / at risk / off track, first partial period prorated, habit-only capacity), neglect thresholds by period, slipping habits (`risk.ts`, `attention.ts`); `engine` job (5 min) sends each alert once per period plus task due reminders (exact time 1 h before, date-only 09:00, exam prep 48 h); Needs-attention card with Keep going / Pause / Change target / Archive, answers recorded (`goal_decisions`, 0017); chat `get_attention`, `respond_to_goal` | 🟡 built and tested; not deployed |
+| 5 | Command center and daily brief v2: one facts loader (`loadBriefFacts`) shared by the brief, `/` and chat; focus score (`focus.ts`); brief stored with per-line source rows (`briefs`, 0018); AI focus note written as placeholders only, validated, with a fixed-template fallback; brief window 08:00–12:00 IST, push exempt from cap and digest; `/` rebuilt mobile-first (glance chips, focus card, calendar, day strip, effort field, Move to tomorrow, active tab) | 🟡 built and tested; not deployed |
+| 6 | AI chief of staff and scoped memory: provider-neutral model types; chat history stored neutral with `marker` rows for New conversation (0019); scoped memory (global / MESA / project / person) with a save guard, `search_memory`, legacy goal/project notes reviewed on `/settings/memory`; planning tools (`get_focus`, `get_week`, `get_accomplished`, `get_commitments`, extended `get_attention`); channel-neutral prompt; grounding guard on every chat answer; web chat transcript with paging, sources caption and starter chips | 🟡 built and tested; not deployed |
+| 7 | Weekly and monthly reviews (migration 0020; reuses `briefs.kind`) | — |
+| 8 | Approval and action system | — |
+| 9 | Google OAuth and two-way calendar | — |
+| 10 | Gmail | — |
+| 11 | Hardening and Telegram removal | — |
+
+### Phases 5–6: changes from the plan
+
+- **No `packages/briefing`.** The facts loader and focus maths live in `packages/db` (`brief-facts.ts`, `focus.ts`);
+  the focus note and the grounding checker in `packages/ai` (`focus-note.ts`, `grounding.ts`); the brief renderer
+  stays in `packages/sync/src/brief.ts`. One loader serves the brief, `/` and the chat tools, with no package cycle.
+- **Migrations 0018 and 0019.** `0018_briefs.sql` adds the briefs table (with `kind`, daily only for now);
+  `0019_memory_scopes.sql` adds memory scopes and chat `format` / `meta` / the `marker` role. Phase 7 therefore
+  starts at **0020** and widens `briefs.kind` to weekly and monthly instead of adding a table.
+  0019 was tightened before it was ever applied: a project-scoped memory must have a non-null subject.
+- **`get_at_risk` is `get_attention`,** extended (deadlines at risk, slipping habits, overdue count, system health with
+  `lms_stale` after 3 h). There is no alias: every extra tool declaration costs tokens on every request.
+- **No pg_trgm.** `search_memory` is ILIKE word matching. It is weaker on typos. Upgrade path: confirm the extension's
+  schema on the live database, add PGlite's `contrib/pg_trgm` to the test harness, then add a GIN index and
+  `word_similarity` ordering behind the same `searchMemories` signature.
+- **The chat guard checks days, weekdays and ids only.** Clock times, counts and durations are not checked. Evidence is
+  this turn's and the history's tool results (failed calls' error text included), every owner message in the loaded
+  history, and the ids of the loaded memories.
+- **`get_week`** adds an `events` list (personal calendar) per day; deadline items carry `project` (tasks) or `course`
+  (assignments).
+
+### Phases 5–6: deploy runbook and manual checks
+
+Not deployed yet. In order, after Phases 0–4 are live:
+1. `npm run db:migrate` (applies 0018 and 0019). `deploy-cloud.ts` refuses to deploy without `0019_memory_scopes.sql`.
+2. `npm run deploy:cloud` — `jarvis-tick` (briefs, engine nudge), `mesa-sync`, `assignment-draft`, and `telegram-bot`
+   **in the same release**: `chat()` now requires a channel and writes neutral history rows.
+3. Redeploy the web app (Vercel). Optional Edge secret: `BRIEF_AI=off` for the template note only.
+
+Rolling back to code from before Phase 6: old code cannot read neutral or `marker` chat rows. Stop using chat, or delete
+`jarvis.chat_messages` rows where `format = 'neutral'` (and the markers) before the old bundles run. Inserting a marker
+row per channel is not enough on its own, because old code does not filter markers.
+
+Manual done-when checks (need the live app, a phone and real Gemini):
+- One tool-using chat with several steps succeeds (thought signatures survive the neutral types).
+- The 08:00 brief arrives as "Your day is ready", with the same focus note at the top of `/`. Check
+  `jarvis.briefs.note_source` / `note_detail` (also in the briefs job run's stats): `invalid:<rule>` days mean the
+  note fell back to the template; tune the allowed words, not the date rules.
+- `/` at 375 px: no sideways page scroll (only the chip row scrolls); ⋯ → Move to tomorrow works and is absent on MESA
+  tasks; Effort saves in quick add and the edit form; the active tab is highlighted.
+- `/settings/memory`: Make it a goal opens a prefilled goal form and the note leaves the review list; Keep as note
+  moves it into About you; the home banner disappears once every old note is answered; the engine queues
+  `memory.review:v1` once.
+- `/chat` at 375 px: opens at the newest message; the composer does not zoom and grows to 5 lines; ⋯ → New conversation
+  adds a divider that survives a reload; Show earlier messages / Back to the latest messages page correctly; the card
+  height leaves the composer above the tab bar (adjust the offset in `chat-box.tsx` if not).
+- Ask the 10 planning questions in web chat: each `Checked: …` caption lists the expected sources and no
+  "Not found in your data" footer appears.
+
+## V1 (history)
+
 Principle: build a working vertical slice first, then widen it. Every phase
 ends with `npm run verify` (typecheck + lint + tests), a live check where
 possible, and doc updates.
@@ -10,9 +87,9 @@ possible, and doc updates.
 | 1 | Investigate MESA LMS | ✅ 2026-09-28 | Auth flow, API catalogue, file access documented ([MESA_INTEGRATION.md](MESA_INTEGRATION.md)) |
 | 2 | LMS extraction layer (PoC) | ✅ 2026-09-28 | `mesa:login` + `mesa:extract` work live; 0 warnings; hashes stable across runs; 57 tests |
 | 3 | Database | ✅ 2026-09-29 | Built: private `jarvis` schema, plain-SQL migrations (`npm run db:migrate`), RLS on, repository in `packages/db`. Changed from plan: no Drizzle; generic `lms_items` table; repo verified live, not against a test Postgres |
-| 4 | Sync engine | ✅ 2026-09-29 (files: pending) | `npm run sync:mesa`: snapshot → diff → items + versions + events + notifications in one transaction; per-kind baseline; light/full; removal only on complete reads. File download to Storage not yet built |
+| 4 | Sync engine | ✅ 2026-09-29 (files ✅ later) | `npm run sync:mesa`: snapshot → diff → items + versions + events + notifications in one transaction; per-kind baseline; light/full; removal only on complete reads. File download to Storage not yet built |
 | 5 | Telegram notifications | ✅ 2026-09-29 | Bot, dedupe keys, quiet hours, batching, deadline reminders (T-72h/24h/3h), "session expiring" alert |
-| 6 | Dashboard | ✅ 2026-09-29 (Vercel, Telegram magic-link login) | Next.js: Today / Assignments / Classes / Sync-runs debug page, behind Supabase Auth |
+| 6 | Dashboard | ✅ 2026-09-29 (Vercel, Telegram magic-link login) | Next.js: Today / Assignments / Classes / Sync-runs debug page, behind a Telegram magic-link login (not Supabase Auth) |
 | 7 | JARVIS chat + tools | ✅ 2026-09-29 (Telegram, Gemini free tier) | Provider-agnostic LLM layer; read tools over the DB; `create_task` / `create_reminder`; chat answers "what's due this week?" from real data |
 | 8 | Gmail + Calendar | 🟡 Calendar ✅ (personal Google Calendar via private iCal feed). Gmail ⏸ deferred by choice (most communication is on the LMS) | OAuth, read-only sync, classification, draft replies (approval-gated send) |
 | 9 | Assignment intelligence | ✅ v2 2026-09-29: finished deliverables — filled Excel templates (exact pivots as live formulas + native charts), slide decks with native charts, Word doc; runs on Vercel (/api/jobs/deliver) | Brief parsing (PDF/DOCX/PPTX/XLSX), requirement extraction, material retrieval, draft deliverables, checks against the original |
@@ -24,7 +101,7 @@ Live in Supabase: `mesa-sync` (cron, 5 min; files; 8 am brief), `telegram-bot` (
 
 Monitoring runs in the cloud: pg_cron calls the `mesa-sync` Edge Function every 5 minutes (light check, ~3 GETs); a full scan runs when the last one is >6 h old. Next up: file downloads to Storage (Phase 4 remainder), then the dashboard (Phase 6) and chat (Phase 7, Gemini free tier).
 
-Deferred from Phase 4: downloading files into Supabase Storage with sha256 dedupe (metadata and stable URLs are stored today).
+Files are downloaded into Supabase Storage with sha256 dedupe (built after this note was first written).
 
 ## Phase 3 — Database (original plan)
 

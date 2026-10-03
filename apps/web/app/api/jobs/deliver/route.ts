@@ -3,11 +3,13 @@ import { GeminiProvider } from "@jarvis/ai";
 import { telegramSender } from "@jarvis/assist";
 import type { Sql } from "@jarvis/db";
 import { deliverAssignment } from "@jarvis/deliver";
+import { loadNotificationSettings } from "@jarvis/notify";
 import { db } from "@/lib/db";
 import { storage } from "@/lib/storage";
 
 // Background job: produce an assignment's deliverables (doc + filled workbook + slides).
-// Called with the shared CRON_SECRET by the 5-minute sync, the Telegram bot and the dashboard.
+// Called with the shared CRON_SECRET by the drafts job, the Telegram bot and the dashboard. The owner hears about the
+// result through the notification queue (inbox / push / email); Telegram is optional (legacy "mirror" mode also gets files).
 // Answers 202 at once and keeps working after the response (up to maxDuration).
 
 export const runtime = "nodejs";
@@ -31,9 +33,7 @@ export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as { assignmentId?: string; trigger?: string; instruction?: string; source?: string };
   if (!body.assignmentId || !UUID.test(body.assignmentId)) return NextResponse.json({ error: "assignmentId required" }, { status: 400 });
   const key = process.env.GEMINI_API_KEY;
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chat = process.env.TELEGRAM_CHAT_ID;
-  if (!key || !token || !chat) return NextResponse.json({ error: "not configured" }, { status: 503 });
+  if (!key) return NextResponse.json({ error: "not configured" }, { status: 503 });
 
   const assignmentId = body.assignmentId;
   const instruction = typeof body.instruction === "string" ? body.instruction.trim().slice(0, 4000) : "";
@@ -43,16 +43,18 @@ export async function POST(req: NextRequest) {
   }
   const trigger = body.trigger === "auto" ? "auto" : "request";
   const model = process.env.GEMINI_DRAFT_MODEL ?? process.env.GEMINI_MODEL ?? "gemini-3.6-flash";
-  const tg = telegramSender(token, chat);
   after(async () => {
+    const sql = db() as unknown as Sql;
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const chat = process.env.TELEGRAM_CHAT_ID;
+    const mirror = !!token && !!chat && (await loadNotificationSettings(sql)).telegram === "mirror";
     const res = await deliverAssignment(
       {
-        sql: db() as unknown as Sql,
+        sql,
         storage: storage(),
         model: new GeminiProvider(key, model, fetch, 200_000),
         modelName: model,
-        sendMessage: tg.sendMessage,
-        sendFile: tg.sendFile,
+        ...(mirror ? { sendFile: telegramSender(token, chat).sendFile } : {}),
       },
       assignmentId,
       trigger,

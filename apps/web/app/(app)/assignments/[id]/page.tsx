@@ -59,7 +59,7 @@ export default async function AssignmentPage({ params }: { params: Promise<{ id:
             ))}
           </ul>
         ) : (
-          <Empty>No drafts yet. Use “Draft with JARVIS”, or send /draft on Telegram.</Empty>
+          <Empty>No drafts yet. Use “Draft with JARVIS”, or ask in Chat.</Empty>
         )}
         <p className="mt-3 text-xs text-[var(--color-muted)]">Drafts are a starting point: verify anything marked [verify] and make the work your own before submitting.</p>
       </Section>

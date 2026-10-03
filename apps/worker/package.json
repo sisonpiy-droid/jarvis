@@ -12,7 +12,9 @@
     "deploy:cloud": "tsx src/deploy-cloud.ts",
     "draft": "tsx src/draft-assignment.ts",
     "draft:all": "tsx src/draft-all.ts",
-    "deliver": "tsx src/deliver.ts"
+    "deliver": "tsx src/deliver.ts",
+    "setup:push": "tsx src/setup-push.ts",
+    "web:login-link": "tsx src/web-login-link.ts"
   },
   "dependencies": {
     "@jarvis/db": "*",

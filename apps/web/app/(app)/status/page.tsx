@@ -4,12 +4,86 @@ import { calendarFeedUrl } from "@/lib/auth";
 import { Badge, Section } from "../ui";
 import { CopyLink } from "./copy-link";
 
+const jobTone = (h: string) => (h === "ok" ? "good" : h === "failing" || h === "never_run" ? "warn" : h === "stale" ? "bad" : "muted");
+
 export default async function StatusPage() {
   const [s, feed] = await Promise.all([status(), calendarFeedUrl()]);
   const tone = (st: string) => (st === "success" || st === "sent" ? "good" : st === "partial" || st === "queued" || st === "skipped" ? "warn" : st === "failed" ? "bad" : "muted");
   return (
     <main>
       <h1 className="text-2xl font-semibold tracking-tight">Status</h1>
+      <Section title="Scheduled jobs">
+        {s.jobs ? (
+          <div className="-mx-4 overflow-x-auto sm:mx-0">
+            <table className="w-full min-w-[560px] text-sm">
+              <thead className="text-left text-[var(--color-muted)]">
+                <tr>
+                  <th className="py-1.5 pl-4 font-medium sm:pl-0">Job</th>
+                  <th className="font-medium">Health</th>
+                  <th className="font-medium">Every</th>
+                  <th className="font-medium">Last success</th>
+                  <th className="pr-4 font-medium sm:pr-0">Last run</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--color-line)]">
+                {s.jobs.map((j) => (
+                  <tr key={j.name} title={j.description}>
+                    <td className="py-1.5 pl-4 sm:pl-0">
+                      <span className="font-medium">{j.name}</span> <span className="hidden text-[var(--color-muted)] md:inline">· {j.description}</span>
+                    </td>
+                    <td>
+                      <Badge tone={jobTone(j.health)}>{j.health.replace("_", " ")}</Badge>
+                      {j.consecutiveFailures > 0 && <span className="ml-2 text-[var(--color-bad)]">{j.consecutiveFailures}× failed</span>}
+                    </td>
+                    <td>{j.cadenceMinutes} min</td>
+                    <td className="whitespace-nowrap">{j.lastSuccessAt ? relative(j.lastSuccessAt) : "—"}</td>
+                    <td className="pr-4 sm:pr-0">
+                      {j.lastStatus ?? "—"}
+                      {j.lastDurationMs !== null && <span className="text-[var(--color-muted)]"> · {(j.lastDurationMs / 1000).toFixed(1)} s</span>}
+                      {j.lastError && j.consecutiveFailures > 0 && <span className="ml-2 text-[var(--color-bad)]">{j.lastError.slice(0, 80)}</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-sm text-[var(--color-muted)]">Job health appears once the database is migrated (`npm run db:migrate`).</p>
+        )}
+      </Section>
+
+      <Section title="Notification delivery (last 24 h)">
+        {s.delivery ? (
+          <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 text-sm">
+            <dt className="text-[var(--color-muted)]">Push devices</dt>
+            <dd>{s.devices ?? 0}</dd>
+            {(["push", "email", "telegram"] as const).map((c) => {
+              const d = s.delivery!.find((x) => x.channel === c);
+              return [
+                <dt key={`${c}-t`} className="text-[var(--color-muted)] capitalize">
+                  {c}
+                  {c === "telegram" ? " (legacy)" : ""}
+                </dt>,
+                <dd key={`${c}-d`}>
+                  {d ? (
+                    <>
+                      {d.sent} sent{d.failed ? <span className="text-[var(--color-bad)]"> · {d.failed} failed</span> : ""}
+                      {d.skipped ? ` · ${d.skipped} skipped` : ""}
+                      {d.pending ? ` · ${d.pending} pending` : ""}
+                      {d.lastSentAt ? <span className="text-[var(--color-muted)]"> · last {relative(d.lastSentAt)}</span> : ""}
+                    </>
+                  ) : (
+                    <span className="text-[var(--color-muted)]">nothing in the last day</span>
+                  )}
+                </dd>,
+              ];
+            })}
+          </dl>
+        ) : (
+          <p className="text-sm text-[var(--color-muted)]">Appears once the database is migrated.</p>
+        )}
+      </Section>
+
       <Section title="MESA connection">
         <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 text-sm">
           <dt className="text-[var(--color-muted)]">State</dt>

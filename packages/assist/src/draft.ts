@@ -1,4 +1,4 @@
-import { listMemories, memoryBlock, type ModelProvider, type Part } from "@jarvis/ai";
+import { loadMemories, memoryBlock, textOf, type ModelProvider, type Part } from "@jarvis/ai";
 import type { Sql } from "@jarvis/db";
 import type { SupabaseStorage } from "@jarvis/files";
 import type { Logger } from "@jarvis/shared";
@@ -170,6 +170,7 @@ export async function draftAssignment(deps: DraftDeps, assignmentId: string, tri
     const used_sources: Array<{ label: string; how: string }> = [];
     const parts: Part[] = [
       {
+        type: "text",
         text: [
           `ASSIGNMENT (from the MESA LMS — authoritative)`,
           `Title: ${a.title}`,
@@ -187,23 +188,24 @@ export async function draftAssignment(deps: DraftDeps, assignmentId: string, tri
     ];
     for (const s of sources) {
       if (s.textStatus === "done" && s.text) {
-        parts.push({ text: `\n=== SOURCE: ${s.label} (${s.role === "brief" ? "ORIGINAL — authoritative" : "reference"}) ===\n${s.text.slice(0, s.role === "brief" ? 60_000 : 20_000)}` });
+        parts.push({ type: "text", text: `\n=== SOURCE: ${s.label} (${s.role === "brief" ? "ORIGINAL — authoritative" : "reference"}) ===\n${s.text.slice(0, s.role === "brief" ? 60_000 : 20_000)}` });
         used_sources.push({ label: s.label, how: "text" });
       } else if (s.textStatus === "original" && s.mime && /pdf|image\//i.test(s.mime) && (s.role === "brief" || used + s.size <= budget)) {
         const bytes = await deps.storage.download(s.path);
         used += bytes.length;
-        parts.push({ text: `\n=== SOURCE: ${s.label} (${s.role === "brief" ? "ORIGINAL — authoritative" : "reference"}), attached as a file ===` });
-        parts.push({ inlineData: { mimeType: s.mime.split(";")[0]!, data: toBase64(bytes) } });
+        parts.push({ type: "text", text: `\n=== SOURCE: ${s.label} (${s.role === "brief" ? "ORIGINAL — authoritative" : "reference"}), attached as a file ===` });
+        parts.push({ type: "file", mimeType: s.mime.split(";")[0]!, data: toBase64(bytes) });
         used_sources.push({ label: s.label, how: "file" });
       }
     }
-    parts.push({ text: "\nWrite the draft now, following the required sections." });
+    parts.push({ type: "text", text: "\nWrite the draft now, following the required sections." });
     log?.info("drafting", { assignment: a.title, sources: used_sources.length, inlineBytes: used });
 
     // 4. Draft.
-    const memories = await listMemories(sql).catch(() => []);
-    const reply = await deps.model.generate({ system: DRAFT_SYSTEM + memoryBlock(memories), contents: [{ role: "user", parts }], tools: [] });
-    const md = stripLatex(reply.parts.filter((p) => p.text && !p.thought).map((p) => p.text).join("").trim());
+    // Preferences, personal context and the MESA notes (general ones, then this course's), in a smaller budget.
+    const memories = await loadMemories(sql, { mesa: true, courseIds: a.courseId ? [String(a.courseId)] : [] }, { factsCap: 10, budgetChars: 4000 }).catch(() => ({ memories: [], omitted: 0 }));
+    const reply = await deps.model.generate({ system: DRAFT_SYSTEM + memoryBlock(memories), messages: [{ role: "user", parts }], tools: [] });
+    const md = stripLatex(textOf(reply));
     if (md.length < 200) throw new Error("the model returned an unusually short draft");
 
     // 5. Package and deliver.

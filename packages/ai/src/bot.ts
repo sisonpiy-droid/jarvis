@@ -1,8 +1,8 @@
 import type { Sql } from "@jarvis/db";
-import type { ModelProvider } from "./gemini";
+import type { ModelProvider } from "./model";
 import { chat } from "./jarvis";
 import { markdownToTelegramHtml, splitForTelegram } from "./telegram-format";
-import { forgetMemory, listMemories } from "./memory";
+import { forgetMemory, listMemories, memoryScopeLabel } from "./memory";
 import { jarvisTools, resolveAssignment } from "./tools";
 
 // Telegram front door. Only the owner's chat is served; every other sender is
@@ -80,7 +80,7 @@ export async function commandReply(deps: BotDeps, cmd: string, arg = ""): Promis
     case "/memory": {
       const mems = await listMemories(deps.sql);
       if (!mems.length) return "🧠 I don't remember anything about you yet. Tell me things like “I prefer short answers” or “my BYOB group is …”.";
-      return ["🧠 <b>What I remember</b>", ...mems.map((m) => `#${m.id} · <i>${m.kind}</i> — ${esc(m.content)}`), "", "Remove one with <code>/forget 12</code>."].join("\n");
+      return ["🧠 <b>What I remember</b>", ...mems.map((m) => `#${m.id} · <i>${esc(memoryScopeLabel(m) || m.kind)}</i> — ${esc(m.content)}`), "", "Remove one with <code>/forget 12</code>."].join("\n");
     }
     case "/forget": {
       const id = Number(arg.replace(/^#/, ""));
@@ -171,7 +171,7 @@ export async function handleUpdate(deps: BotDeps, update: TelegramUpdate): Promi
     }
     await telegram(deps, "sendChatAction", { chat_id: deps.ownerChatId, action: "typing" }).catch(() => {});
     const res = await chat(
-      { sql: deps.sql, model: deps.model, ...(deps.now ? { now: deps.now } : {}), tools: jarvisTools(deps.sql, deps.now, {
+      { sql: deps.sql, model: deps.model, channel: "telegram", ...(deps.now ? { now: deps.now } : {}), tools: jarvisTools(deps.sql, deps.now, {
           ...(deps.requestDraft ? { requestDraft: deps.requestDraft } : {}),
           ...(deps.requestRevision ? { requestRevision: deps.requestRevision } : {}),
         }),

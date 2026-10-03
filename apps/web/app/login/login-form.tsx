@@ -13,13 +13,13 @@ export function LoginForm() {
     );
   }
   return (
-    <form action={action} className="mt-6">
+    <form action={action} className="mt-2">
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-lg bg-[var(--color-accent)] px-4 py-2.5 font-medium text-white disabled:opacity-60"
+        className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium disabled:opacity-60"
       >
-        {pending ? "Sending…" : "Send me a login link on Telegram"}
+        {pending ? "Sending…" : "Send a login link to Telegram"}
       </button>
       {state.status === "error" && <p className="mt-3 text-sm text-[var(--color-bad)]">{state.message}</p>}
     </form>

@@ -40,7 +40,7 @@ export function ReviseBox({ assignmentId, placeholder = "e.g. Our startup is Sni
           ↻ Redo as-is
         </button>
         <span className="text-[var(--color-muted)]">
-          {state === "started" ? "On it — revised files arrive on Telegram and here in ~2 min." : state === "error" ? "Failed — try again." : "Saved for this assignment; every future draft follows it."}
+          {state === "started" ? "On it — you’ll get a notification and the revised files appear here in ~2 min." : state === "error" ? "Failed — try again." : "Saved for this assignment; every future draft follows it."}
         </span>
       </div>
     </form>

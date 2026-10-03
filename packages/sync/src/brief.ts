@@ -1,106 +1,171 @@
-import type { NotificationDraft, Sql } from "@jarvis/db";
+import * as db from "@jarvis/db";
+import type { BriefFacts, BriefLine, BriefSections, CalendarEntry, FactRef, FocusItem, GoalAttention, HabitWithStatus, NotificationDraft, Sql } from "@jarvis/db";
+import { focusNote, type ModelProvider } from "@jarvis/ai";
 import { esc } from "@jarvis/notify";
-import { istHour, relative } from "./time";
 
-// The 8 am daily brief. Built from the database *after* the sync, so it is
-// current; queued by whichever run first passes 08:00 IST (dedupe key = date),
-// so a missed run just means it arrives a few minutes later.
+export type { BriefLine } from "@jarvis/db";
 
-const IST_OFFSET_MS = 330 * 60_000;
-export const BRIEF_HOUR = 8;
+// The morning brief (V2 Phase 5). Every line is rendered from BriefFacts (packages/db/src/brief-facts.ts) and
+// carries the rows it came from, so each one can be traced back to the database. Layout, in spec order: title,
+// meta line (date, classes, free time, all-day entries), TODAY'S PRIORITIES, PERSONAL, UPCOMING, GOALS, RISKS,
+// then the 🧭 focus note. The push shows the title, the meta line and the numbered priorities.
+// The briefs job (jobs.ts) decides when; this file decides what.
 
-/** Start and end (UTC ISO) of the IST calendar day containing `now`, plus its label. */
-export function istDay(now: Date) {
-  const ist = new Date(now.getTime() + IST_OFFSET_MS);
-  const start = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()) - IST_OFFSET_MS);
-  return {
-    key: ist.toISOString().slice(0, 10),
-    start: start.toISOString(),
-    end: new Date(start.getTime() + 86_400_000).toISOString(),
-    label: new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", weekday: "long", day: "numeric", month: "long" }).format(now),
-  };
+const HEADLINE = "Good morning — your day is ready";
+/** The push title (the brief's first line, as plain text). */
+export const BRIEF_TITLE = `☀️ ${HEADLINE}`;
+/** The whole brief stays within this many characters (inbox, email and Telegram's 4,096 limit). */
+export const BRIEF_MAX_CHARS = 3_500;
+const TITLE_MAX = 80;
+const RISK_MAX = 160;
+const NOTE_MAX = 600;
+const ALL_DAY_SHOWN = 3;
+const NO_PRIORITIES = "Nothing pressing at work today.";
+
+type SectionName = "priorities" | "personal" | "upcoming" | "goals" | "risks";
+type Caps = Record<SectionName, number>;
+const SECTION_ORDER: SectionName[] = ["priorities", "personal", "upcoming", "goals", "risks"];
+const HEADINGS: Record<SectionName, string> = { priorities: "TODAY'S PRIORITIES", personal: "PERSONAL", upcoming: "UPCOMING", goals: "GOALS", risks: "RISKS" };
+const CAPS: Caps = { priorities: 3, personal: 6, upcoming: 6, goals: 5, risks: 5 };
+/** When the brief is too long, the section showing the most lines loses one (ties in this order). */
+const TRIM_ORDER: SectionName[] = ["upcoming", "goals", "personal", "risks", "priorities"];
+
+interface Item {
+  html: string;
+  refs: FactRef[];
 }
 
-const time = (iso: string) => new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(iso));
+const cut = (s: string, max = TITLE_MAX) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s);
+const title = (s: string) => esc(cut(s));
+const num = (n: number) => String(Math.round(n * 10) / 10);
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : word.endsWith("s") ? "es" : "s"}`;
+const dueText = (i: FocusItem, now: Date) => (i.task.dueAt ? ` — ${db.whenLabel(i.task.dueAt, i.task.dueIsDateOnly, now)}` : "");
+const taskRef = (i: FocusItem): FactRef => ({ t: "task", id: i.task.id });
 
-export interface BriefData {
-  classes: Array<{ title: string; course: string | null; startAt: string; room: string | null; status: string | null }>;
-  due: Array<{ title: string; course: string | null; dueAt: string; dueIst: string | null }>;
-  newSince: { announcements: number; materials: number; recordings: number; assignments: number };
-  /** All-day personal calendar entries today (birthdays, holidays, trips…). */
-  allDay?: string[];
-  sessionExpiresAt: string | null;
-}
+/** "Thursday, 1 October · 1 class from 10:00 am (1 cancelled) · 3 h 30 min free · All day: Dussehra" */
+function metaLine(f: BriefFacts): Item {
+  const timed = (e: CalendarEntry) => !e.allDay;
+  const classes = f.calendar.filter((e) => timed(e) && !e.personal && !e.cancelled);
+  const cancelled = f.calendar.filter((e) => timed(e) && !e.personal && e.cancelled);
+  const events = f.calendar.filter((e) => timed(e) && e.personal && !e.cancelled);
+  const allDay = f.calendar.filter((e) => e.allDay && !e.cancelled);
 
-export function renderBrief(d: BriefData, now: Date): string {
-  const day = istDay(now);
-  const short = (c: string | null) => (c ? c.replace(/\s+with\s+.*$/i, "") : null);
-  const lines = [`☀️ <b>Good morning — ${esc(day.label)}</b>`, ""];
-  if (d.allDay?.length) lines.push(`📌 Today: ${d.allDay.map((t) => esc(t)).join(", ")}`, "");
-  const live = d.classes.filter((c) => c.status !== "cancelled");
-  lines.push(live.length ? `🏫 <b>Today's schedule (${live.length})</b>` : "🏫 Nothing scheduled today.");
-  for (const c of live) lines.push(`• ${time(c.startAt)} — ${esc(short(c.course) ?? c.title)}${c.course && c.title !== c.course ? `: ${esc(c.title)}` : ""}${c.room ? ` <i>(${esc(c.room)})</i>` : ""}`);
-  const cancelled = d.classes.filter((c) => c.status === "cancelled");
-  if (cancelled.length) lines.push(`❌ Cancelled: ${cancelled.map((c) => esc(c.title)).join(", ")}`);
-  lines.push("");
-  if (d.due.length) {
-    lines.push(`📌 <b>Due in the next 3 days, not submitted (${d.due.length})</b>`);
-    for (const a of d.due) lines.push(`• ${esc(a.dueIst ?? "")} (${relative(a.dueAt, now)}) — ${esc(a.title)}${a.course ? ` <i>(${esc(short(a.course))})</i>` : ""}`);
-  } else lines.push("📌 Nothing unsubmitted is due in the next 3 days. ✅");
-  const n = d.newSince;
-  const bits = [
-    n.assignments && `${n.assignments} assignment${n.assignments > 1 ? "s" : ""}`,
-    n.announcements && `${n.announcements} announcement${n.announcements > 1 ? "s" : ""}`,
-    n.materials && `${n.materials} material${n.materials > 1 ? "s" : ""}`,
-    n.recordings && `${n.recordings} recording${n.recordings > 1 ? "s" : ""}`,
-  ].filter(Boolean);
-  if (bits.length) lines.push("", `🆕 Since yesterday: ${bits.join(", ")}`);
-  if (d.sessionExpiresAt && Date.parse(d.sessionExpiresAt) - now.getTime() < 5 * 86_400_000) {
-    lines.push("", `🔑 MESA sign-in expires ${relative(d.sessionExpiresAt, now)} — run <code>npm run mesa:login</code> soon.`);
+  const parts = [f.label];
+  const cls = classes.length ? `${plural(classes.length, "class")} from ${db.fmtIstTime(classes[0]!.startAt)}` : "No classes";
+  parts.push(cancelled.length ? `${cls} (${cancelled.length} cancelled)` : cls);
+  if (events.length) parts.push(plural(events.length, "event"));
+  if (f.freeTime.freeMin > 0) parts.push(`${db.fmtMinutes(f.freeTime.freeMin)} free`);
+  if (allDay.length) {
+    const shown = allDay.slice(0, ALL_DAY_SHOWN).map((e) => cut(e.title, 40));
+    parts.push(`All day: ${shown.join(", ")}${allDay.length > ALL_DAY_SHOWN ? ` +${allDay.length - ALL_DAY_SHOWN} more` : ""}`);
   }
-  return lines.join("\n");
+  const refs: FactRef[] = [...classes, ...cancelled, ...events, ...allDay].map((e) => e.ref);
+  if (f.stale) refs.push({ t: "integration", id: "mesa" });
+  return { html: parts.map((p) => esc(p)).join(" · "), refs };
 }
 
-export async function loadBriefData(sql: Sql, now: Date): Promise<BriefData> {
-  const day = istDay(now);
-  const nowIso = now.toISOString();
-  const in72h = new Date(now.getTime() + 72 * 3_600_000).toISOString();
-  const since = new Date(now.getTime() - 86_400_000).toISOString();
-  const classes = await sql`
-    select title, data ->> 'courseName' as course, data ->> 'startAt' as start_at, data ->> 'room' as room, data ->> 'status' as status
-      from jarvis.lms_items
-     where kind in ('event', 'gcal_event') and removed_at is null and sort_at >= ${day.start} and sort_at < ${day.end}
-       and not coalesce((data ->> 'allDay')::boolean, false)
-     order by sort_at`;
-  const due = await sql`
-    select title, data ->> 'courseTitle' as course, data ->> 'dueAt' as due_at, data ->> 'dueAtIst' as due_ist
-      from jarvis.lms_items
-     where kind = 'assignment' and removed_at is null and sort_at > ${nowIso} and sort_at <= ${in72h}
-       and data ->> 'submissionStatus' not in ('submitted', 'submitted_late')
-     order by sort_at`;
-  const counts = await sql`
-    select kind, count(*)::int as n from jarvis.lms_items
-     where first_seen_at >= ${since} and kind in ('announcement', 'material', 'recording', 'assignment')
-       and first_seen_at > (select min(first_seen_at) + interval '1 hour' from jarvis.lms_items)  -- exclude the initial import
-     group by kind`;
-  const c = Object.fromEntries(counts.map((r) => [r.kind as string, r.n as number]));
-  const [integ] = await sql`select session_expires_at from jarvis.integrations where provider = 'mesa'`;
-  const allDay = await sql`
-    select title from jarvis.lms_items
-     where kind = 'gcal_event' and removed_at is null and (data ->> 'allDay')::boolean
-       and sort_at >= ${day.start} and sort_at < ${day.end} order by title`;
+/** "Workout (2 of 4 this week)", "Read 30 minutes ✓", "Meditate — skipped". */
+function habitItem(h: HabitWithStatus): Item {
+  const st = h.status;
+  const detail = st.periodTarget != null ? ` (${st.periodDone} of ${st.periodTarget} ${h.schedule.freq === "monthly" ? "this month" : "this week"})` : "";
+  const mark = st.today === "done" ? " ✓" : st.today === "skipped" ? " — skipped" : "";
+  return { html: `- ${title(h.name)}${esc(detail)}${mark}`, refs: [{ t: "habit", id: h.id }] };
+}
+
+/** "Workout: 2/4 this week"; value goals "Weight: 72 kg (target 70)". */
+function goalItem(g: GoalAttention): Item {
+  const p = g.progress;
+  const text =
+    g.metric === "value"
+      ? `${p.current != null ? `${num(p.current)}${g.unit ? ` ${g.unit}` : ""}` : "no entry yet"} (target ${num(p.target ?? 0)})`
+      : `${num(p.current ?? 0)}/${num(p.target ?? 0)} ${db.PERIOD_LABEL[g.period]}`;
+  return { html: `${title(g.title)}: ${esc(text)}`, refs: [{ t: "goal", id: g.id }] };
+}
+
+/** Each section's items in order, uncapped (a "+N more" line carries the refs of what isn't shown). */
+function sectionItems(f: BriefFacts, s: BriefSections): Record<SectionName, Item[]> {
+  const now = new Date(f.at);
+  // briefSections stops at 3 priorities; the rest of the professional queue only feeds "+N more".
+  const top = new Set(s.priorities.map((i) => i.task.id));
+  const priorities = [...s.priorities, ...f.focus.filter((i) => i.task.domain === "professional" && i.score >= 1 && !top.has(i.task.id))];
   return {
-    classes: classes.map((r) => ({ title: r.title, course: r.course, startAt: r.start_at, room: r.room, status: r.status })),
-    due: due.map((r) => ({ title: r.title, course: r.course, dueAt: r.due_at, dueIst: r.due_ist })),
-    newSince: { announcements: c.announcement ?? 0, materials: c.material ?? 0, recordings: c.recording ?? 0, assignments: c.assignment ?? 0 },
-    sessionExpiresAt: integ?.session_expires_at ? new Date(integ.session_expires_at).toISOString() : null,
-    allDay: allDay.map((r) => String(r.title)),
+    priorities: priorities.map((i, n) => ({ html: `${n + 1}. ${title(i.task.title)}${esc(dueText(i, now))}`, refs: [taskRef(i)] })),
+    personal: [
+      ...s.personal.habits.map(habitItem),
+      ...s.personal.tasks.map((i) => ({ html: `- ${title(i.task.title)}${esc(dueText(i, now))}`, refs: [taskRef(i)] })),
+    ],
+    upcoming: s.upcoming.map((d) => ({ html: `- ${title(d.title)} — ${esc(d.when)}`, refs: [d.ref] })),
+    goals: s.goals.map(goalItem),
+    // A brief built from stale LMS data says so first: at severity 1 a busy day's "+N more" would hide it.
+    risks: [...s.risks.filter((r) => r.kind === "stale"), ...s.risks.filter((r) => r.kind !== "stale")].map((r) => ({ html: `- ${esc(cut(r.text, RISK_MAX))}`, refs: r.refs })),
   };
 }
 
-/** Today's brief as a notification draft, or null if it's before 08:00 IST. */
-export async function morningBrief(sql: Sql, now: Date): Promise<NotificationDraft | null> {
-  if (istHour(now) < BRIEF_HOUR) return null;
-  const day = istDay(now);
-  return { dedupeKey: `brief:${day.key}`, priority: "normal", text: renderBrief(await loadBriefData(sql, now), now), scheduledFor: now.toISOString() };
+function layout(meta: Item, items: Record<SectionName, Item[]>, note: Item | null, caps: Caps): BriefLine[] {
+  const lines: BriefLine[] = [
+    { kind: "title", html: `☀️ <b>${HEADLINE}</b>`, refs: [] },
+    { kind: "meta", html: meta.html, refs: meta.refs },
+  ];
+  for (const name of SECTION_ORDER) {
+    const all = items[name];
+    if (!all.length && name !== "priorities") continue; // empty sections are left out, except the priorities
+    if (name !== "priorities") lines.push({ kind: "blank", html: "", refs: [] }); // the meta line runs straight into the priorities
+    lines.push({ kind: "heading", html: `<b>${HEADINGS[name]}</b>`, refs: [] });
+    if (!all.length) lines.push({ kind: "item", html: NO_PRIORITIES, refs: [] });
+    const shown = all.slice(0, caps[name]);
+    for (const i of shown) lines.push({ kind: "item", html: i.html, refs: i.refs });
+    const hidden = all.slice(shown.length);
+    if (hidden.length) lines.push({ kind: "more", html: `+${hidden.length} more`, refs: hidden.flatMap((i) => i.refs) });
+  }
+  if (note) lines.push({ kind: "blank", html: "", refs: [] }, { kind: "note", html: note.html, refs: note.refs });
+  return lines;
+}
+
+const joined = (lines: BriefLine[]) => lines.map((l) => l.html).join("\n");
+
+/**
+ * The brief as notification text (Telegram's HTML subset, every value escaped) and as lines with their refs.
+ * Sections over their cap end in "+N more"; if the whole is still over 3,500 characters, sections give up
+ * whole lines (never part of one, so no tag is ever cut) until it fits.
+ */
+export function renderBrief(f: BriefFacts, s: BriefSections, note: { text: string; refs: FactRef[] }): { text: string; lines: BriefLine[] } {
+  const meta = metaLine(f);
+  const items = sectionItems(f, s);
+  const noteItem = note.text ? { html: `🧭 <i>${esc(cut(note.text, NOTE_MAX))}</i>`, refs: note.refs } : null;
+  const caps = { ...CAPS };
+  const shown = (n: SectionName) => Math.min(caps[n], items[n].length);
+  let lines = layout(meta, items, noteItem, caps);
+  while (joined(lines).length > BRIEF_MAX_CHARS) {
+    const most = TRIM_ORDER.filter((n) => shown(n) > 1).sort((a, b) => shown(b) - shown(a))[0];
+    if (!most) break;
+    caps[most] = shown(most) - 1;
+    lines = layout(meta, items, noteItem, caps);
+  }
+  // Every line is bounded, so this can't happen with the caps above; kept so the limit holds whatever changes.
+  if (joined(lines).length > BRIEF_MAX_CHARS && noteItem) lines = layout(meta, items, null, caps);
+  return { text: joined(lines), lines };
+}
+
+/**
+ * Today's brief: facts → focus note → lines → jarvis.briefs → the notification draft. The note is written once a
+ * day: if this day's brief was already stored (say the run crashed before queueing it), its note is reused and
+ * the model isn't called again.
+ */
+export async function dailyBrief(
+  sql: Sql,
+  now: Date,
+  o: { model: ModelProvider | null; stale: boolean },
+): Promise<{ draft: NotificationDraft; stats: { focusNote: "ai" | "fallback"; detail: string | null; lines: number } }> {
+  const f = await db.loadBriefFacts(sql, now, { stale: o.stale });
+  const s = db.briefSections(f);
+  const existing = await db.getBrief(sql, f.day);
+  const note = existing
+    ? { text: existing.note ?? "", refs: existing.noteRefs, source: existing.noteSource, detail: existing.noteDetail }
+    : await focusNote(o.model, f, s);
+  const { text, lines } = renderBrief(f, s, note);
+  await db.saveBrief(sql, { day: f.day, lines, text, note: note.text || null, noteSource: note.source, noteDetail: note.detail, noteRefs: note.refs });
+  return {
+    draft: { dedupeKey: `brief:${f.day}`, priority: "normal", text, scheduledFor: now.toISOString(), url: "/" },
+    stats: { focusNote: note.source, detail: note.detail, lines: lines.length },
+  };
 }
