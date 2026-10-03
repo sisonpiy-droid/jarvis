@@ -14,6 +14,19 @@ export default function manifest(): MetadataRoute.Manifest {
     orientation: "portrait",
     background_color: "#111214",
     theme_color: "#111214",
+    // "JARVIS" in the phone's Share menu (Android, installed app). The service worker catches the POST and hands
+    // the shared text, link and files to /share. iPhone has no web share targets: there, 📎 in chat does the same.
+    share_target: {
+      action: "/share-target",
+      method: "POST",
+      enctype: "multipart/form-data",
+      params: {
+        title: "title",
+        text: "text",
+        url: "url",
+        files: [{ name: "files", accept: ["image/*", "application/pdf", ".pdf", ".docx", ".pptx", ".xlsx", "text/plain", ".txt", ".csv"] }],
+      },
+    },
     icons: [
       { src: "/pwa-icon/192", sizes: "192x192", type: "image/png", purpose: "any" },
       { src: "/pwa-icon/512", sizes: "512x512", type: "image/png", purpose: "any" },

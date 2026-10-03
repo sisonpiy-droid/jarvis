@@ -11,3 +11,4 @@ export * from "./risk";
 export * from "./attention";
 export * from "./focus";
 export * from "./brief-facts";
+export * from "./class-prep";

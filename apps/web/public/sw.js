@@ -1,4 +1,4 @@
-/* global self */
+/* global self, caches */
 /* JARVIS service worker: shows pushes, opens the right page on tap (marking it read), and gives a small
    offline page instead of the browser's error. Kept dependency-free and tiny on purpose. */
 
@@ -84,7 +84,37 @@ self.addEventListener("notificationclick", (event) => {
   );
 });
 
+// Share sheet → JARVIS (Android). The shared title/text/link and files are parked in a cache and the app opens
+// /share, which reads them from there and asks what to do. Nothing is uploaded until the owner chooses.
+const SHARE_CACHE = "jarvis-share-v1";
+
+async function receiveShare(request) {
+  try {
+    const form = await request.formData();
+    const cache = await caches.open(SHARE_CACHE);
+    for (const key of await cache.keys()) await cache.delete(key);
+    const files = form.getAll("files").filter((f) => f && typeof f === "object" && "size" in f && f.size > 0).slice(0, 5);
+    const meta = {
+      title: String(form.get("title") || ""),
+      text: String(form.get("text") || ""),
+      url: String(form.get("url") || ""),
+      files: files.map((f, i) => ({ name: f.name || `shared-${i + 1}`, type: f.type || "", size: f.size })),
+      at: Date.now(),
+    };
+    await Promise.all(files.map((f, i) => cache.put(`/__share/file/${i}`, new Response(f, { headers: { "Content-Type": f.type || "application/octet-stream" } }))));
+    await cache.put("/__share/meta", new Response(JSON.stringify(meta), { headers: { "Content-Type": "application/json" } }));
+    return Response.redirect(new URL("/share", self.location.origin).href, 303);
+  } catch {
+    return Response.redirect(new URL("/share?failed=1", self.location.origin).href, 303);
+  }
+}
+
 self.addEventListener("fetch", (event) => {
+  if (event.request.method === "POST") {
+    const url = new URL(event.request.url);
+    if (url.origin === self.location.origin && url.pathname === "/share-target") event.respondWith(receiveShare(event.request));
+    return;
+  }
   if (event.request.mode !== "navigate") return;
   event.respondWith(fetch(event.request).catch(() => new Response(OFFLINE_HTML, { headers: { "Content-Type": "text/html; charset=utf-8" } })));
 });

@@ -2,3 +2,4 @@ export * from "./office-text";
 export * from "./storage";
 export * from "./fetch-files";
 export * from "./pdf-text";
+export * from "./ingest";

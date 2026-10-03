@@ -8,3 +8,4 @@ export * from "./calendar";
 export * from "./jobs";
 export * from "./work";
 export * from "./engine";
+export * from "./class-prep";
