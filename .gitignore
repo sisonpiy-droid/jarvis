@@ -22,3 +22,6 @@ apps/web/next-env.d.ts
 
 .vercel
 .env*
+
+# TypeScript build caches
+*.tsbuildinfo
