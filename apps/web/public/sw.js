@@ -35,13 +35,14 @@ self.addEventListener("push", (event) => {
   );
 });
 
-// Marks notifications read (stops email escalation). Same-origin, so the session cookie is sent.
+// Marks notifications opened (and read, which stops email escalation): the signal JARVIS learns from about
+// which alerts matter. Same-origin, so the session cookie is sent.
 const markRead = (ids) =>
   fetch("/api/notifications", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "read", ids }),
+    body: JSON.stringify({ action: "open", ids }),
   }).catch(() => {});
 
 self.addEventListener("notificationclick", (event) => {
@@ -66,6 +67,21 @@ self.addEventListener("notificationclick", (event) => {
             return;
           }
           // Signed out or offline: fall through and open the check-in page instead.
+        }
+      }
+      // "Move the rest to tomorrow" on the evening check-in: done in the background.
+      if (event.action === "checkin-move") {
+        const res = await fetch("/api/checkin", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "move" }),
+        }).catch(() => null);
+        if (res && res.ok) {
+          if (data.ids && data.ids.length) await markRead(data.ids);
+          const j = await res.json().catch(() => ({}));
+          await self.registration.showNotification("Moved to tomorrow", { body: `${j.moved || 0} task(s) now due tomorrow.`, tag: "jarvis-checkin-moved", icon: "/pwa-icon/192", data: { url: "/tasks", ids: [] } });
+          return;
         }
       }
       if (data.ids && data.ids.length) {

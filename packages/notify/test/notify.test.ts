@@ -122,6 +122,13 @@ describe("policy", () => {
     expect(route({ priority: "low", category: "material" }, S(), ist("10:00"), all).deliveries).toEqual([]);
   });
 
+  it("stops pushing kinds the owner learned to ignore — unless the item is high or urgent", () => {
+    const s = S({ learnedQuiet: ["habit"] });
+    expect(route({ priority: "normal", category: "habit" }, s, ist("10:00"), all).deliveries).toEqual([]);
+    expect(route({ priority: "high", category: "habit" }, s, ist("10:00"), all).deliveries.map((d) => d.channel)).toEqual(["push"]);
+    expect(route({ priority: "normal", category: "goal" }, s, ist("10:00"), all).deliveries.map((d) => d.channel)).toEqual(["push"]);
+  });
+
   it("respects muted categories and immediate email", () => {
     const s = S({ mutedCategories: ["announcement"] });
     s.routes.normal.email = "immediate";

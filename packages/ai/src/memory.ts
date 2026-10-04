@@ -29,6 +29,8 @@ export interface Memory {
   lastUsedAt: string | null;
   /** An old 'goal' / 'project' note still waiting for the owner's one-time review. */
   legacy: boolean;
+  /** 'learned': picked up by JARVIS from a day's chats (nightly), not saved on request. */
+  learned: boolean;
 }
 
 export const MEMORY_SCOPES: readonly MemoryScope[] = ["global", "mesa", "project", "person"];
@@ -54,7 +56,7 @@ const like = (w: string) => `%${w.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
 const reEscape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const isScope = (v: unknown): v is MemoryScope => (MEMORY_SCOPES as readonly unknown[]).includes(v);
 
-const COLS = (sql: Sql) => sql`id, kind, content, scope, subject_id, subject_label, created_at, last_used_at, reviewed_at`;
+const COLS = (sql: Sql) => sql`id, kind, content, scope, subject_id, subject_label, created_at, last_used_at, reviewed_at, source`;
 const RECENT = (sql: Sql) => sql`coalesce(last_used_at, created_at) desc, id desc`;
 
 function toMemory(r: Record<string, unknown>): Memory {
@@ -69,6 +71,7 @@ function toMemory(r: Record<string, unknown>): Memory {
     createdAt: new Date(r.created_at as string).toISOString(),
     lastUsedAt: r.last_used_at ? new Date(r.last_used_at as string).toISOString() : null,
     legacy: LEGACY_KINDS.has(kind) && r.reviewed_at == null,
+    learned: r.source === "learned",
   };
 }
 

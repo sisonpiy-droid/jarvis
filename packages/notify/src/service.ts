@@ -5,7 +5,7 @@ import { emailHtml, sendEmail, type EmailConfig } from "./email";
 import { planMessages, type Channel } from "./index";
 import { pushBudget, route, telegramFallbackOnPushFailure, type ChannelAvailability } from "./policy";
 import { renderNotification, toPlainText } from "./render";
-import { parseSettings, SETTINGS_KEY, type Level, type NotificationSettings } from "./settings";
+import { LEARNED_KEY, parseSettings, SETTINGS_KEY, type Level, type NotificationSettings } from "./settings";
 import { sendPush, type PushMessage, type VapidKeys } from "./webpush";
 
 // The notification service. Runs inside the `notify` job (every minute):
@@ -42,6 +42,8 @@ const HABIT_ACTIONS = [
   { action: "habit-skip", title: "Skip today" },
 ];
 
+const CHECKIN_ACTIONS = [{ action: "checkin-move", title: "Move the rest to tomorrow" }];
+
 const URGENCY: Record<Level, PushMessage["urgency"]> = { urgent: "high", high: "high", normal: "normal", low: "low" };
 
 /** The push for one notification. Pure (exported for tests). */
@@ -57,12 +59,15 @@ export function pushMessage(n: RoutableNotification, abs: (path: string) => stri
     ttl: n.priority === "urgent" ? 6 * 3600 : 24 * 3600,
     // Habit check-ins can be answered from the notification itself (Android; iPhone opens the page).
     ...(n.dedupeKey.startsWith("habit.reminder:") ? { actions: HABIT_ACTIONS, ttl: 6 * 3600 } : {}),
+    // The evening check-in offers one tap to move today's unfinished tasks to tomorrow (when there are some).
+    ...(n.dedupeKey.startsWith("checkin:") && n.text.includes("Still open") ? { actions: CHECKIN_ACTIONS, ttl: 6 * 3600 } : {}),
   };
 }
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 export async function loadNotificationSettings(sql: Sql): Promise<NotificationSettings> {
-  return parseSettings(await db.getSetting(sql, SETTINGS_KEY).catch(() => null));
+  const [stored, learned] = await Promise.all([db.getSetting(sql, SETTINGS_KEY).catch(() => null), db.getSetting<{ quiet?: Record<string, unknown> }>(sql, LEARNED_KEY).catch(() => null)]);
+  return { ...parseSettings(stored), learnedQuiet: Object.keys(learned?.quiet ?? {}) };
 }
 
 export async function runNotificationService(

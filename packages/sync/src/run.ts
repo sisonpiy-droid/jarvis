@@ -11,6 +11,7 @@ import {
   type MesaAssignment,
   type MesaSnapshot,
 } from "@jarvis/mesa";
+import { fetchSubmissionTimes } from "./submissions";
 import { fetchPendingFiles, type BlobStorage, type FetchResult } from "@jarvis/files";
 import type { Channel, NotifyChannels } from "@jarvis/notify";
 import type { Logger } from "@jarvis/shared";
@@ -161,6 +162,13 @@ export async function mesaSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncS
     work = await syncWork(sql, now);
   } catch (err) {
     log.warn("task sync failed", { error: err });
+  }
+
+  // Real submission times (a few per run until all are known). Never fails the sync.
+  try {
+    await fetchSubmissionTimes(sql, client);
+  } catch (err) {
+    log.warn("submission times failed", { error: err });
   }
 
   // Files last: alerts are never delayed by downloads, and a download problem never fails the sync.

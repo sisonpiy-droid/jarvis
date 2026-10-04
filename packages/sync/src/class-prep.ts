@@ -2,21 +2,17 @@ import { prepPoints, type ModelProvider } from "@jarvis/ai";
 import * as db from "@jarvis/db";
 import type { ClassPrep, NotificationDraft, Sql } from "@jarvis/db";
 import type { Logger } from "@jarvis/shared";
-import { istHour } from "./time";
 
 // The prep job (every 5 min): key points for the pre-reads of the next day and a half of classes (at most two
-// AI calls a run, each pre-read summarised once ever), a push ~30 minutes before each MESA session with its
-// pre-read and points, and at 20:00 IST a list of tomorrow's classes and their pre-reads. Each alert's dedupe
-// key names the class (or the day), so it is sent once.
+// AI calls a run, each pre-read summarised once ever) and a push ~30 minutes before each MESA session with its
+// pre-read and points. Tomorrow's pre-reads are listed in the evening check-in (evening.ts). Each push's dedupe
+// key names the class, so it is sent once.
 
 /** The push goes out when a class starts within this window. */
 export const PREP_LEAD_MS = 35 * 60_000;
 /** Pre-reads of classes this far ahead get their key points written in advance. */
 const SUMMARY_AHEAD_MS = 36 * 3_600_000;
 const SUMMARIES_PER_RUN = 2;
-/** The evening list: from 20:00 until 23:00 IST (before quiet hours). */
-export const EVENING_HOUR = 20;
-const EVENING_LAST_HOUR = 23;
 
 const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const fmtTime = (iso: string) => new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit", hour12: true }).format(new Date(iso));
@@ -51,32 +47,18 @@ export function prepAlert(p: ClassPrep, now: Date): NotificationDraft {
   return { dedupeKey: `class.prep:${p.event.id}:${p.event.startAt}`, priority: "high", text, scheduledFor: now.toISOString() };
 }
 
-/** The 20:00 list of tomorrow's classes with their pre-reads (null when tomorrow has none). */
-export function eveningList(day: db.Day, preps: ClassPrep[], now: Date): NotificationDraft | null {
-  if (!preps.length) return null;
-  const withReads = preps.filter((p) => p.items.some((i) => i.preRead) && p.match === "session").length;
-  const head = `🌙 <b>Tomorrow: ${preps.length} ${preps.length === 1 ? "class" : "classes"}</b>${withReads ? ` · ${withReads} with a pre-read` : ""}`;
-  const blocks = preps.map((p) => {
-    const reads = p.match === "session" ? p.items.filter((i) => i.preRead) : [];
-    const what = reads.length ? reads.map((i) => `   ${esc(i.title)}${i.kind === "link" ? " (link)" : ""}`).join("\n") : "   No pre-read on the LMS";
-    return `${fmtTime(p.event.startAt)} ${esc(courseName(p))}${sessionLabel(p)}\n${what}`;
-  });
-  return { dedupeKey: `class.eve:${day}`, priority: "normal", text: [head, ...blocks].join("\n"), scheduledFor: now.toISOString() };
-}
-
 export interface PrepSummary {
   upcoming: number;
   summarized: number;
   summaryErrors: number;
   alerts: number;
-  evening: boolean;
   queued: number;
 }
 
 export async function runClassPrep(sql: Sql, now: Date, model: ModelProvider | null, log?: Logger): Promise<PrepSummary> {
   const ahead = await db.sessionsBetween(sql, now, new Date(now.getTime() + SUMMARY_AHEAD_MS));
   const preps = (await Promise.all(ahead.map((s) => db.classPrep(sql, s.id, now)))).filter((p): p is ClassPrep => !!p);
-  const out: PrepSummary = { upcoming: preps.length, summarized: 0, summaryErrors: 0, alerts: 0, evening: false, queued: 0 };
+  const out: PrepSummary = { upcoming: preps.length, summarized: 0, summaryErrors: 0, alerts: 0, queued: 0 };
 
   // 1. Key points for pre-reads that have text and none yet — soonest class first.
   if (model) {
@@ -105,20 +87,6 @@ export async function runClassPrep(sql: Sql, now: Date, model: ModelProvider | n
     if (ms > 0 && ms <= PREP_LEAD_MS) drafts.push(prepAlert(p, now));
   }
   out.alerts = drafts.length;
-
-  // 3. The evening list of tomorrow's classes.
-  const h = istHour(now);
-  if (h >= EVENING_HOUR && h < EVENING_LAST_HOUR) {
-    const tomorrow = db.addDays(db.istDay(now), 1);
-    const [sent] = await sql`select 1 from jarvis.notifications where dedupe_key = ${`class.eve:${tomorrow}`}`;
-    if (!sent) {
-      const list = eveningList(tomorrow, preps.filter((p) => db.istDay(p.event.startAt) === tomorrow), now);
-      if (list) {
-        drafts.push(list);
-        out.evening = true;
-      }
-    }
-  }
   out.queued = drafts.length ? await db.enqueueNotifications(sql, drafts) : 0;
   return out;
 }

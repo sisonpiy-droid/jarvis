@@ -15,6 +15,7 @@ const mem = (id: number, content: string, extra: Partial<Memory> = {}): Memory =
   createdAt: "2026-09-01T00:00:00.000Z",
   lastUsedAt: null,
   legacy: false,
+  learned: false,
   ...extra,
 });
 

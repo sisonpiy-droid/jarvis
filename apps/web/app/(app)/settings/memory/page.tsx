@@ -103,8 +103,9 @@ export default async function MemoryPage({ searchParams }: { searchParams: Promi
                     <div className="break-words">{m.content}</div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-[var(--color-muted)]">
                       <Badge>{memoryScopeLabel(m) || m.kind}</Badge>
+                      {m.learned && <Badge tone="warn">Learned from chat</Badge>}
                       <span>
-                        #{m.id} · saved {relative(m.createdAt)}
+                        #{m.id} · {m.learned ? "learned" : "saved"} {relative(m.createdAt)}
                         {m.lastUsedAt ? ` · last used ${relative(m.lastUsedAt)}` : ""}
                       </span>
                     </div>

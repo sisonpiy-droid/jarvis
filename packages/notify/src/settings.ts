@@ -35,7 +35,13 @@ export const settingsSchema = z.object({
    */
   telegram: z.enum(["off", "fallback", "mirror"]),
 });
-export type NotificationSettings = z.infer<typeof settingsSchema>;
+export type NotificationSettings = z.infer<typeof settingsSchema> & {
+  /** Categories JARVIS learned the owner ignores (stored apart, key LEARNED_KEY): normal/low items skip the push. */
+  learnedQuiet?: string[];
+};
+
+/** What JARVIS learned about alerts (jarvis.settings): kept apart so saving preferences never overwrites it. */
+export const LEARNED_KEY = "notifications.learned";
 
 export const DEFAULT_SETTINGS: NotificationSettings = {
   routes: {

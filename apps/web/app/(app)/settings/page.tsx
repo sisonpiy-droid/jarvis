@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { countMemories } from "@jarvis/ai";
-import { activePushSubscriptions, listPasskeys, NOTIFICATION_CATEGORIES, recoveryCodesLeft } from "@jarvis/db";
+import { activePushSubscriptions, categoryLabel, getLearnedRouting, listPasskeys, NOTIFICATION_CATEGORIES, recoveryCodesLeft, workPatterns } from "@jarvis/db";
 import { loadNotificationSettings } from "@jarvis/notify";
 import { relative } from "@/lib/format";
 import { sql } from "@/lib/passkey";
 import { Section } from "../ui";
-import { removeDevice } from "./actions";
+import { keepAlertAction, removeDevice } from "./actions";
 import { Passkeys } from "./passkeys";
 import { PreferencesForm } from "./preferences-form";
 import { PushControls } from "./push-controls";
@@ -14,12 +14,14 @@ export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const s = sql();
-  const [settings, devices, passkeys, codesLeft, memories] = await Promise.all([
+  const [settings, devices, passkeys, codesLeft, memories, learned, patterns] = await Promise.all([
     loadNotificationSettings(s),
     activePushSubscriptions(s),
     listPasskeys(s),
     recoveryCodesLeft(s),
     countMemories(s).catch(() => null),
+    getLearnedRouting(s),
+    workPatterns(s, new Date()).catch(() => null),
   ]);
   const vapid = process.env.VAPID_PUBLIC_KEY || null;
   const telegramConfigured = !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID);
@@ -35,6 +37,40 @@ export default async function SettingsPage() {
           <span className="ml-2 text-xs text-[var(--color-muted)]">
             {memories.legacy} old {memories.legacy === 1 ? "note" : "notes"} to review
           </span>
+        )}
+      </Section>
+
+      <Section title="What JARVIS learned" id="learned">
+        <h3 className="text-sm font-medium">How you work</h3>
+        {patterns?.lines.length ? (
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
+            {patterns.lines.map((l) => (
+              <li key={l}>{l.split(" [task #")[0]}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-1 text-sm text-[var(--color-muted)]">Not enough history yet. JARVIS learns from your submission times and the tasks you finish or keep moving.</p>
+        )}
+        <h3 className="mt-4 text-sm font-medium">Quietened alerts</h3>
+        {Object.keys(learned.quiet).length ? (
+          <ul className="mt-1 space-y-2 text-sm">
+            {Object.entries(learned.quiet).map(([c, q]) => (
+              <li key={c} className="flex flex-wrap items-center justify-between gap-2">
+                <span>
+                  🔕 {categoryLabel(c)} go to your inbox only{" "}
+                  <span className="text-[var(--color-muted)]">
+                    — you didn&apos;t open the last {q.ignored} ({relative(q.since)})
+                  </span>
+                </span>
+                <form action={keepAlertAction}>
+                  <input type="hidden" name="category" value={c} />
+                  <button className="min-h-11 rounded-lg border border-[var(--color-line)] px-3 text-sm hover:bg-[var(--color-line)]">Turn back on</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-1 text-sm text-[var(--color-muted)]">None. If you never open a kind of push for two weeks, it moves to your inbox only. Deadlines, classes and urgent alerts always reach your phone.</p>
         )}
       </Section>
 
