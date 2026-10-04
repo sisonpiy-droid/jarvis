@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic";
 const NAV = [
   ["/", "Today"],
   ["/tasks", "Tasks"],
+  ["/plan", "Plan"],
   ["/projects", "Projects"],
   ["/goals", "Goals"],
   ["/inbox", "Inbox"],
@@ -61,6 +62,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           ))}
         </nav>
         <nav className="flex flex-wrap gap-3 text-sm md:hidden">
+          <Link href="/plan" className="text-[var(--color-muted)] no-underline">
+            Plan
+          </Link>
           <Link href="/goals" className="text-[var(--color-muted)] no-underline">
             Goals
           </Link>

@@ -91,7 +91,7 @@ export function accomplishedRange(period: AccomplishedPeriod, today: Day): { fro
 
 /** Open tasks that read like something owed to someone else. */
 export const OWE_RE = /\b(send|email|mail|reply|respond|follow[- ]?up|call|text|message|share|intro(duce)?|deliver|return|pay|get back to|confirm|promised?)\b/i;
-export const COMMITMENTS_CAVEAT = "JARVIS has no people tracker yet; this comes from your tasks and notes.";
+export const COMMITMENTS_CAVEAT = "People are the names set on tasks (plus notes about people); a task without a name only shows here if it reads like a promise.";
 
 export function planningTools(sql: Sql, now: () => Date = () => new Date()): Tool[] {
   return [
@@ -237,7 +237,7 @@ export function planningTools(sql: Sql, now: () => Date = () => new Date()): Too
       name: "get_commitments",
       effect: "read",
       description:
-        "What the owner owes other people and is waiting on: open tasks that read like a promise (send, reply, follow up, call, share …), tasks waiting on someone, notes about people, and people / open questions recorded on projects. There is no people tracker yet — always say so.",
+        "Commitments: what the owner owes people (open tasks with a person, or that read like a promise: send, reply, follow up …) and what others owe them (waiting tasks, with who and whether it's overdue), grouped by person, plus notes about people and people / open questions on projects.",
       parameters: obj({}),
       async run() {
         const t = now();
@@ -251,8 +251,10 @@ export function planningTools(sql: Sql, now: () => Date = () => new Date()): Too
         ]);
         return {
           caveat: COMMITMENTS_CAVEAT,
-          you_owe: open.filter((x) => (x.status === "todo" || x.status === "doing") && x.source !== "mesa" && OWE_RE.test(x.title)).map((x) => taskBrief(x, t)),
-          waiting_on_others: open.filter((x) => x.status === "waiting").map((x) => ({ id: x.id, title: x.title, since_iso: x.updatedAt, due: due(x, t), due_iso: x.dueAt })),
+          you_owe: open.filter((x) => (x.status === "todo" || x.status === "doing") && x.source !== "mesa" && (x.person || OWE_RE.test(x.title))).map((x) => ({ ...taskBrief(x, t), to: x.person ?? undefined })),
+          waiting_on_others: open
+            .filter((x) => x.status === "waiting")
+            .map((x) => ({ id: x.id, title: x.title, from: x.person ?? undefined, since_iso: x.updatedAt, due: due(x, t), due_iso: x.dueAt, overdue: !!x.dueAt && Date.parse(x.dueAt) < t.getTime() })),
           people_notes: notes.map((r) => ({ memory_id: Number(r.id), person: String(r.subject_label ?? r.subject_id), content: String(r.content) })),
           project_people: items.map((r) => ({ project_id: Number(r.project_id), project: String(r.title), kind: String(r.kind), body: String(r.body) })),
         };

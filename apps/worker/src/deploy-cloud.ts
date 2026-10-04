@@ -10,7 +10,7 @@ import { loadEnv, repoRoot } from "@jarvis/shared";
 //   2. upload their secrets            4. schedule one pg_cron entry per job (jarvis-job-<name> → jarvis-tick?job=<name>)
 //   5. run the health job once and show the result
 //   6. deploy the Telegram bot and point Telegram's webhook at it
-// Run `npm run db:migrate` first: the jobs and the bot need every migration up to 0021 (chief of staff: evening job, submissions, learned alerts).
+// Run `npm run db:migrate` first: the jobs and the bot need every migration up to 0022 (task person for commitments).
 // Needs SUPABASE_ACCESS_TOKEN in .env (supabase.com/dashboard/account/tokens).
 
 loadEnv();
@@ -35,9 +35,9 @@ const run = (args: string[]) => execFileSync(npx, [...CLI, ...args], { cwd: root
 {
   const check = connect(need("SUPABASE_DB_URL"));
   try {
-    const [m] = await check`select 1 from jarvis._migrations where name = '0021_chief_of_staff.sql'`;
+    const [m] = await check`select 1 from jarvis._migrations where name = '0022_commitments.sql'`;
     if (!m) {
-      console.error("Migration 0021_chief_of_staff.sql isn't applied yet — run `npm run db:migrate` first.");
+      console.error("Migration 0022_commitments.sql isn't applied yet — run `npm run db:migrate` first.");
       process.exit(2);
     }
   } finally {

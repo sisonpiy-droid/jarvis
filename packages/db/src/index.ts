@@ -16,3 +16,4 @@ export * from "./patterns";
 export * from "./situation";
 export * from "./alert-learning";
 export * from "./checkin";
+export * from "./week-plan";

@@ -5,6 +5,7 @@ import { loadHistory, saveTurns } from "./history";
 import { textOf, type Message, type ModelProvider } from "./model";
 import { detectMemoryFocus, loadMemories, memoryBlock, memoryTools, type Memory } from "./memory";
 import { jarvisTools } from "./tools";
+import { weekPlanTool } from "./week-plan";
 
 // The chat brain, the same for every surface (web chat, the legacy Telegram bot): a channel-neutral prompt,
 // scoped memory, the tool loop, and a grounding guard that checks every date and id in the answer against the
@@ -35,7 +36,8 @@ Which tool answers what:
 - "Which goals are at risk?" → get_attention.
 - "What is due this week?" / "How does my week look?" → get_week.
 - "What did I accomplish?" / "What got done?" → get_accomplished.
-- "What did I promise people?" / "What do I owe?" → get_commitments; state its caveat: there is no people tracker yet.
+- "What did I promise people?" / "What do I owe?" / "What am I waiting on?" → get_commitments. When the owner promises something to someone or someone owes them something ("I told Rahul I'd send the slides by Friday", "Aditi will share the data Monday"), record it: create_task with person (status waiting when the other person owes it), with the due date if one was said.
+- "Plan my week" / "re-plan" → make_week_plan, then summarise the blocks and say they can approve or change it on /plan.
 - "Review my week" → get_week + get_accomplished (this_week) + get_attention.
 - "Review my month" → get_accomplished (this_month) + get_attention + list_goals. Reviews arrive in Phase 7; report observations, not judgments.
 
@@ -98,7 +100,7 @@ export async function chat(deps: ChatDeps, userText: string): Promise<ChatResult
   // The live situation (today, the week, risks, how the owner works). Chat still works without it.
   const situation = deps.situation === false ? null : await loadSituation(sql, at).then((s) => s.text).catch(() => null);
   const system = systemPrompt(at, memories, situation);
-  const tools = [...(deps.tools ?? jarvisTools(sql, now)), ...memoryTools(sql, now)];
+  const tools = [...(deps.tools ?? jarvisTools(sql, now)), ...memoryTools(sql, now), weekPlanTool(sql, deps.model, now)];
   const message = userText.slice(0, 4000);
 
   const first = await runAgent({ model: deps.model, system, history, user: [{ type: "text", text: message }], tools, maxSteps: MAX_CHAT_STEPS });

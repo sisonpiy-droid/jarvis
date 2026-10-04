@@ -41,6 +41,8 @@ export interface Task {
   completedAt: string | null;
   /** Times the owner moved the due date later (MESA deadline changes don't count). */
   postponedCount: number;
+  /** Commitment: the person this is owed to (todo/doing) or awaited from (waiting). */
+  person: string | null;
 }
 
 export interface Project {
@@ -95,6 +97,7 @@ const toTask = (r: R): Task => ({
   updatedAt: iso(r.updated_at ?? r.created_at)!,
   completedAt: iso(r.completed_at),
   postponedCount: Number(r.postponed_count ?? 0),
+  person: (r.person as string | null) ?? null,
 });
 
 const toProject = (r: R): Project => ({
@@ -177,6 +180,7 @@ export interface NewTask {
   effortMin?: number | null;
   isNextAction?: boolean;
   source?: WorkSource;
+  person?: string | null;
 }
 
 export async function createTask(sql: Sql, input: NewTask): Promise<Task> {
@@ -194,11 +198,11 @@ export async function createTask(sql: Sql, input: NewTask): Promise<Task> {
   }
   if (input.goalId != null && !(await sql`select 1 from jarvis.goals where id = ${input.goalId}`).length) throw new WorkInputError(`goal ${input.goalId} not found`);
   const [row] = await sql`
-    insert into jarvis.tasks (title, notes, domain, area, project_id, goal_id, priority, status, due_at, due_is_date_only, effort_min, is_next_action, source, completed_at)
+    insert into jarvis.tasks (title, notes, domain, area, project_id, goal_id, priority, status, due_at, due_is_date_only, effort_min, is_next_action, source, completed_at, person)
     values (${title}, ${cleanText(input.notes, 4000) || null}, ${domain}, ${area}, ${input.projectId ?? null}, ${input.goalId ?? null},
             ${input.priority == null ? 2 : priorityOf(input.priority)}, ${status}, ${dueAt}, ${dateOnly},
             ${input.effortMin == null ? null : Math.max(1, Math.min(10000, Math.round(Number(input.effortMin)) || 1))},
-            ${input.isNextAction ?? false}, ${input.source ?? "manual"}, ${status === "done" ? new Date().toISOString() : null})
+            ${input.isNextAction ?? false}, ${input.source ?? "manual"}, ${status === "done" ? new Date().toISOString() : null}, ${clean(input.person, 80) || null})
     returning id`;
   if (status === "done") await syncTaskActivity(sql, Number(row!.id));
   return (await getTask(sql, Number(row!.id)))!;
@@ -218,6 +222,7 @@ export interface TaskPatch {
   projectId?: number | null;
   goalId?: number | null;
   isNextAction?: boolean;
+  person?: string | null;
   effortMin?: number | null;
 }
 
@@ -239,6 +244,7 @@ export async function updateTask(sql: Sql, id: number, patch: TaskPatch): Promis
     next.dueIsDateOnly = due.dateOnly;
   }
   if (patch.isNextAction !== undefined) next.isNextAction = patch.isNextAction;
+  if (patch.person !== undefined) next.person = clean(patch.person, 80) || null;
   if (patch.effortMin !== undefined) next.effortMin = patch.effortMin == null ? null : Math.max(1, Math.min(10000, Math.round(Number(patch.effortMin)) || 1));
   if (patch.projectId !== undefined) {
     if (patch.projectId != null && !(await sql`select 1 from jarvis.projects where id = ${patch.projectId}`).length) throw new WorkInputError(`project ${patch.projectId} not found`);
@@ -256,7 +262,7 @@ export async function updateTask(sql: Sql, id: number, patch: TaskPatch): Promis
     update jarvis.tasks set title = ${next.title}, notes = ${next.notes}, priority = ${next.priority}, status = ${next.status},
            due_at = ${next.dueAt}, due_is_date_only = ${next.dueIsDateOnly}, is_next_action = ${closing ? false : next.isNextAction},
            effort_min = ${next.effortMin}, project_id = ${next.projectId}, goal_id = ${next.goalId}, completed_at = ${completedAt}, updated_at = now(),
-           postponed_count = postponed_count + ${postponed ? 1 : 0}, last_postponed_at = case when ${postponed} then now() else last_postponed_at end
+           person = ${next.person}, postponed_count = postponed_count + ${postponed ? 1 : 0}, last_postponed_at = case when ${postponed} then now() else last_postponed_at end
      where id = ${id}`;
   if (cur.status !== next.status || cur.goalId !== next.goalId) await syncTaskActivity(sql, id);
   return getTask(sql, id);

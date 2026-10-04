@@ -183,7 +183,7 @@ export const jobBodies: Record<JobName, (deps: SyncDeps, opts: SyncOptions, now:
 
   async evening(deps, _opts, now) {
     const s = await runEvening(deps.sql, now, deps.model ?? null, deps.log);
-    if (!s.checkin && !s.learned) return { status: "idle" };
+    if (!s.checkin && !s.learned && s.planned == null) return { status: "idle" };
     return { status: s.errors.length ? "partial" : "success", stats: { ...s }, ...(s.errors.length ? { error: s.errors.join("; ") } : {}) };
   },
 
