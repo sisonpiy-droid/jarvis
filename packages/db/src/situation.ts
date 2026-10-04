@@ -1,7 +1,8 @@
 import type { Sql } from "./client";
 import { briefSections, loadBriefFacts, type BriefFacts, type CalendarEntry } from "./brief-facts";
-import { fmtIstShort, fmtIstTime, fmtMinutes, freeTime } from "./focus";
+import { fmtIstShort, fmtIstTime, fmtMinutes, freeTime, type FreeTime } from "./focus";
 import { workPatterns, type WorkPatterns } from "./patterns";
+import { blockLine, getWeekPlan, upcomingBlocks, type PlanBlock, type WeekPlan } from "./week-plan";
 import { addDays, dayStartIso, istDay, type Day } from "./progress";
 
 // The chief of staff's picture of the owner's situation, rebuilt from the database for every chat turn and the
@@ -18,6 +19,7 @@ export interface DayLoad {
   personal: CalendarEntry[];
   deadlines: Array<{ title: string; at: string; kind: string; context: string | null }>;
   freeMin: number;
+  gaps: FreeTime["gaps"];
 }
 
 export interface Situation {
@@ -25,6 +27,7 @@ export interface Situation {
   facts: BriefFacts;
   week: DayLoad[];
   patterns: WorkPatterns;
+  plan: WeekPlan | null;
   text: string;
 }
 
@@ -49,13 +52,13 @@ export function weekLoad(f: BriefFacts, days = 7): DayLoad[] {
       blocks: timed.filter((e) => !e.personal && !isClass(e)),
       personal: events.filter((e) => e.personal),
       deadlines: f.upcoming.filter((d) => istDay(d.at) === day).map((d) => ({ title: d.title, at: d.at, kind: d.kind, context: d.context })),
-      freeMin: freeTime(timed, new Date(dayStartIso(day))).freeMin,
+      ...(({ freeMin, gaps }) => ({ freeMin, gaps }))(freeTime(timed, new Date(dayStartIso(day)))),
     });
   }
   return out;
 }
 
-export function situationText(f: BriefFacts, week: DayLoad[], patterns: WorkPatterns): string {
+export function situationText(f: BriefFacts, week: DayLoad[], patterns: WorkPatterns, plan: PlanBlock[] = []): string {
   const now = new Date(f.at);
   const s = briefSections(f);
   const L: string[] = [];
@@ -101,6 +104,7 @@ export function situationText(f: BriefFacts, week: DayLoad[], patterns: WorkPatt
   // Risks, what can wait, patterns
   const risks = s.risks.filter((r) => r.kind !== "overdue").slice(0, MAX_LIST);
   if (risks.length) L.push(`At risk: ${risks.map((r) => r.text).join("; ")}.`);
+  if (plan.length) L.push(`Approved week plan, blocks still ahead: ${plan.slice(0, 8).map((b) => blockLine(b)).join("; ")}${more(plan.length - 8)}.`);
   if (f.defer.length) L.push(`Can wait: ${f.defer.slice(0, 3).map((d) => `${d.task.title} [task #${d.task.id}] (${d.deferReason})`).join("; ")}.`);
   if (patterns.lines.length) {
     L.push("How the owner works (from their own history):");
@@ -110,7 +114,7 @@ export function situationText(f: BriefFacts, week: DayLoad[], patterns: WorkPatt
 }
 
 export async function loadSituation(sql: Sql, now: Date): Promise<Situation> {
-  const [facts, patterns] = await Promise.all([loadBriefFacts(sql, now), workPatterns(sql, now)]);
+  const [facts, patterns, plan] = await Promise.all([loadBriefFacts(sql, now), workPatterns(sql, now), getWeekPlan(sql)]);
   const week = weekLoad(facts);
-  return { at: now.toISOString(), facts, week, patterns, text: situationText(facts, week, patterns) };
+  return { at: now.toISOString(), facts, week, patterns, plan, text: situationText(facts, week, patterns, upcomingBlocks(plan, now)) };
 }

@@ -45,7 +45,7 @@ describe("systemPrompt", () => {
       expect(lines, q).toHaveLength(1);
       for (const tool of tools) expect(lines[0], q).toContain(tool);
     }
-    expect(p).toContain("state its caveat: there is no people tracker yet");
+    expect(p).toContain("create_task with person");
     expect(p).toContain("change nothing unless told");
   });
 

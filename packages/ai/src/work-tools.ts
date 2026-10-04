@@ -31,6 +31,7 @@ const task = (x: Task, now: Date) => ({
   next_action: x.isNextAction || undefined,
   from_mesa: x.source === "mesa" || undefined,
   notes: x.notes ?? undefined,
+  person: x.person ?? undefined,
 });
 
 const project = (p: Project) => ({
@@ -106,6 +107,7 @@ export function workTools(sql: Sql, now: () => Date = () => new Date()): Tool[] 
           notes: { type: "string" },
           next_action: { type: "boolean", description: "Mark as the project's next action" },
           effort_min: { type: "integer", description: "Optional estimate in minutes (1–600), only when the owner gives one" },
+          person: { type: "string", description: "A commitment: who it's owed to (todo) or who owes it (status waiting), e.g. 'Rahul'" },
         },
         ["title"],
       ),
@@ -121,6 +123,7 @@ export function workTools(sql: Sql, now: () => Date = () => new Date()): Tool[] 
           ...(typeof a.status === "string" && a.status ? { status: a.status as db.TaskStatus } : {}),
           notes: str(a.notes) || null,
           isNextAction: a.next_action === true,
+          person: str(a.person) || null,
           source: "chat",
         });
         return { created: task(created, now()) };
@@ -143,6 +146,7 @@ export function workTools(sql: Sql, now: () => Date = () => new Date()): Tool[] 
           notes: { type: "string" },
           next_action: { type: "boolean" },
           effort_min: { type: "integer", description: "Estimate in minutes (1–600); 0 clears it" },
+          person: { type: "string", description: "Who it's owed to / awaited from; empty string clears it" },
         },
         ["id"],
       ),
@@ -159,6 +163,7 @@ export function workTools(sql: Sql, now: () => Date = () => new Date()): Tool[] 
         if (a.effort_min != null && a.effort_min !== "") patch.effortMin = effortOf(a.effort_min, true);
         if (typeof a.project === "string") patch.projectId = str(a.project) ? await resolveProject(sql, a.project) : null;
         if (a.goal !== undefined) patch.goalId = int(a.goal);
+        if (typeof a.person === "string") patch.person = a.person;
         const updated = await db.updateTask(sql, id, patch);
         if (!updated) return { updated: false, reason: `task ${id} not found` };
         return { updated: task(updated, now()) };

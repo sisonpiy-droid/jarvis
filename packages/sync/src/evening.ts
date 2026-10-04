@@ -1,4 +1,4 @@
-import { learnFromMessages, ownerMessagesBetween, type ModelProvider } from "@jarvis/ai";
+import { draftWeekPlan, learnFromMessages, ownerMessagesBetween, type ModelProvider } from "@jarvis/ai";
 import * as db from "@jarvis/db";
 import type { Sql } from "@jarvis/db";
 import type { Logger } from "@jarvis/shared";
@@ -10,10 +10,18 @@ import type { Logger } from "@jarvis/shared";
 export const CHECKIN_FROM_MIN = 20 * 60 + 30;
 const CHECKIN_UNTIL_MIN = 23 * 60;
 export const LEARN_FROM_MIN = 22 * 60 + 30;
+export const PLAN_FROM_MIN = 19 * 60;
 const LEARN_MARK_KEY = "learning.last_day";
 
 const istMinutes = (now: Date) => Math.floor(((now.getTime() / 60_000 + 330) % 1440 + 1440) % 1440);
 const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** The Sunday push: the first few blocks; the whole plan is on /plan. */
+export function planText(p: db.WeekPlan): string {
+  const lines = p.blocks.slice(0, 5).map((b) => `- ${esc(db.blockLine(b, false))}`);
+  const more = p.blocks.length > 5 ? [`+${p.blocks.length - 5} more`] : [];
+  return [`🗓️ <b>Your plan for the week: ${p.blocks.length} work block${p.blocks.length === 1 ? "" : "s"}</b>`, ...(p.note ? [esc(p.note)] : []), ...lines, ...more, "Approve or change it in JARVIS."].join("\n");
+}
 
 export interface EveningSummary {
   checkin: boolean;
@@ -21,11 +29,12 @@ export interface EveningSummary {
   memories: number;
   rejected: number;
   quietened: string[];
+  planned: number | null;
   errors: string[];
 }
 
 export async function runEvening(sql: Sql, now: Date, model: ModelProvider | null, log?: Logger): Promise<EveningSummary> {
-  const out: EveningSummary = { checkin: false, learned: false, memories: 0, rejected: 0, quietened: [], errors: [] };
+  const out: EveningSummary = { checkin: false, learned: false, memories: 0, rejected: 0, quietened: [], planned: null, errors: [] };
   const m = istMinutes(now);
   const day = db.istDay(now);
 
@@ -34,6 +43,21 @@ export async function runEvening(sql: Sql, now: Date, model: ModelProvider | nul
     if (!sent) {
       const c = await db.loadCheckin(sql, now);
       out.checkin = (await db.enqueueNotifications(sql, [{ dedupeKey: `checkin:${day}`, priority: "normal", text: db.checkinText(c), scheduledFor: now.toISOString() }])) > 0;
+    }
+  }
+
+  // Sunday 19:00: next week's plan, drafted once (any plan made today counts) and offered for approval.
+  if (model && db.weekday(day) === 7 && m >= PLAN_FROM_MIN) {
+    const cur = await db.getWeekPlan(sql);
+    if (!cur || db.istDay(cur.createdAt) !== day) {
+      try {
+        const plan = await draftWeekPlan(model, await db.loadSituation(sql, now), now);
+        await db.saveWeekPlan(sql, plan);
+        out.planned = plan.blocks.length;
+        await db.enqueueNotifications(sql, [{ dedupeKey: `plan:${day}`, priority: "normal", text: planText(plan), scheduledFor: now.toISOString() }]);
+      } catch (err) {
+        out.errors.push(`plan: ${err instanceof Error ? err.message.slice(0, 160) : String(err)}`);
+      }
     }
   }
 

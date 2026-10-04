@@ -4,6 +4,7 @@ import { fmtIstShort, fmtIstTime, fmtMinutes, rankFocus, whenLabel, type FocusIt
 import { addDays, dayStartIso, istDay, type Day } from "./progress";
 import { loadSituation, type DayLoad, type Situation } from "./situation";
 import { getTask, updateTask, type Task } from "./work";
+import { upcomingBlocks, type PlanBlock } from "./week-plan";
 
 // The evening check-in (20:30 IST): what got done, what's still open from today (one tap moves it to tomorrow),
 // MESA work due tonight, tomorrow at a glance with its pre-reads, tomorrow's top 3, and at most one nudge drawn
@@ -19,6 +20,10 @@ export interface Checkin {
   tomorrow: DayLoad;
   prereads: Array<{ course: string; session: number | null; titles: string[] }>;
   top: FocusItem[];
+  /** Tomorrow's blocks from the approved week plan. */
+  planned: PlanBlock[];
+  /** Things others owe the owner that are past due (waiting tasks with a person). */
+  chase: Task[];
   nudge: string | null;
 }
 
@@ -72,6 +77,8 @@ export async function loadCheckin(sql: Sql, now: Date): Promise<Checkin> {
     tomorrow,
     prereads: preps.map((p) => ({ course: p!.event.short ?? short(p!.event.course ?? p!.event.title), session: p!.session, titles: p!.match === "session" ? p!.items.filter((i) => i.preRead).map((i) => i.title) : [] })),
     top,
+    planned: upcomingBlocks(s.plan, now, tomorrowDay),
+    chase: f.openTasks.filter((t) => t.status === "waiting" && t.person && t.dueAt && Date.parse(t.dueAt) < now.getTime()),
     nudge: checkinNudge(s, tomorrow),
   };
 }
@@ -87,7 +94,9 @@ export function checkinText(c: Checkin): string {
   L.push(`📅 Tomorrow (${fmtIstShort(dayStartIso(t.day))}): ${esc(parts.join(" · "))}`);
   if (c.prereads.length)
     L.push(`📖 Pre-reads: ${esc(c.prereads.map((p) => `${p.course}${p.session != null ? ` S${p.session}` : ""} — ${p.titles.length ? p.titles.join(", ") : "none on the LMS"}`).join("; "))}`);
-  if (c.top.length) L.push(`🎯 Tomorrow's top ${c.top.length}: ${esc(c.top.map((i, n) => `${n + 1}. ${i.task.title}`).join("  "))}`);
+  if (c.planned.length) L.push(`🗓️ Planned: ${esc(c.planned.map((b) => `${fmtIstTime(b.start)} ${b.title}`).join("; "))}`);
+  else if (c.top.length) L.push(`🎯 Tomorrow's top ${c.top.length}: ${esc(c.top.map((i, n) => `${n + 1}. ${i.task.title}`).join("  "))}`);
+  for (const t of c.chase.slice(0, 3)) L.push(`📨 ${esc(t.person!)} still owes you: ${esc(t.title)} (due ${fmtIstShort(t.dueAt!)}) — nudge them?`);
   if (c.nudge) L.push(`💡 ${esc(c.nudge)}`);
   return L.join("\n");
 }

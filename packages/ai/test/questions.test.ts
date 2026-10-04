@@ -223,7 +223,6 @@ describe("the ten chief-of-staff questions", () => {
       expect(res.guard).toEqual({ ok: true, repaired: false, unverified: [] });
       expect(res.text).not.toMatch(/Not found in your data/);
       expect(res.sources).toEqual([...new Set(Q.plan.map(([n]) => n))]);
-      if (Q.q.includes("promise")) expect(res.text).toContain("no people tracker yet");
 
       const { items } = await chatTranscript(t.sql, "web");
       expect(items.map((i) => [i.role, i.text])).toEqual([

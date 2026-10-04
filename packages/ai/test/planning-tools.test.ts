@@ -159,10 +159,9 @@ describe("planning tools", () => {
     const w = await seedPlanningWorld();
     const r = await call("get_commitments");
     expect(r.caveat).toBe(COMMITMENTS_CAVEAT);
-    expect(r.caveat).toMatch(/no people tracker/);
     expect(r.you_owe.map((x: { id: number }) => x.id)).toEqual([w.recruiter.id, w.callHome.id]);
     expect(r.you_owe[0]).toMatchObject({ title: "Send recruiter follow-up", due: "overdue since Wed 30 Sep", due_iso: "2026-09-30T04:30:00.000Z" });
-    expect(r.waiting_on_others).toEqual([{ id: w.waiting.id, title: "Slides from Riya", since_iso: expect.any(String), due: "Sat 3 Oct", due_iso: "2026-10-03T18:29:00.000Z" }]);
+    expect(r.waiting_on_others).toEqual([{ id: w.waiting.id, title: "Slides from Riya", since_iso: expect.any(String), due: "Sat 3 Oct", due_iso: "2026-10-03T18:29:00.000Z", overdue: false }]);
     expect(r.people_notes).toEqual([{ memory_id: w.riyaNote, person: "Riya", content: "Riya prefers WhatsApp over email" }]);
     expect(r.project_people).toEqual([
       { project_id: w.side.id, project: "Side project", kind: "person", body: "Asha helps with the design" },

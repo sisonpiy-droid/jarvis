@@ -29,6 +29,7 @@ const task = (title: string, o: Partial<Task> = {}): Task => ({
   updatedAt: "2026-09-29T04:00:00.000Z",
   completedAt: null,
   postponedCount: 0,
+  person: null,
   ...o,
 });
 const habit = (name: string, today: HabitWithStatus["status"]["today"]): HabitWithStatus => ({
