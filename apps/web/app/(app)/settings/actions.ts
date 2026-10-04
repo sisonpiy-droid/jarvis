@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { putSetting, removePushSubscription, NOTIFICATION_CATEGORIES } from "@jarvis/db";
+import { keepAlertCategory, putSetting, removePushSubscription, NOTIFICATION_CATEGORIES } from "@jarvis/db";
 import { LEVELS, SETTINGS_KEY, settingsSchema } from "@jarvis/notify";
 import { isSignedIn } from "@/lib/auth";
 import { sql } from "@/lib/passkey";
@@ -31,5 +31,13 @@ export async function removeDevice(form: FormData): Promise<void> {
   if (!(await isSignedIn())) return;
   const id = Number(form.get("id"));
   if (Number.isInteger(id)) await removePushSubscription(sql(), { id });
+  revalidatePath("/settings");
+}
+
+/** "Turn back on" a kind of alert JARVIS had quietened: it pushes again and is never quietened again. */
+export async function keepAlertAction(form: FormData): Promise<void> {
+  if (!(await isSignedIn())) return;
+  const category = String(form.get("category") ?? "");
+  if (/^[a-z_]{2,30}$/.test(category)) await keepAlertCategory(sql(), category);
   revalidatePath("/settings");
 }

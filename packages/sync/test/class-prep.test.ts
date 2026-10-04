@@ -4,7 +4,8 @@ import { estimateSession, sessionNumber } from "@jarvis/db";
 import { createLogger } from "@jarvis/shared";
 import { createTestDb, type TestDb } from "../../db/test/harness";
 import { say, scripted } from "../../ai/test/scripted";
-import { eveningList, prepAlert, runClassPrep } from "../src/class-prep";
+import { prepAlert, runClassPrep } from "../src/class-prep";
+import { runEvening } from "../src/evening";
 
 // Pre-class prep against the real migrations (in-process Postgres): which session a class is, which pre-read
 // belongs to it, the key points (scripted model), the 30-minute push and the evening list — each sent once.
@@ -94,7 +95,7 @@ describe("prep job", () => {
   it("writes key points once, pushes 30 minutes before, and never twice", async () => {
     const { model, requests } = scripted(POINTS);
     const s = await runClassPrep(t.sql, NOW, model, log);
-    expect([s.summarized, s.alerts, s.evening]).toEqual([1, 1, false]);
+    expect([s.summarized, s.alerts]).toEqual([1, 1]);
     expect(requests[0]!.messages[0]!.parts[0]).toMatchObject({ type: "text" });
     // The invented 99% is dropped: the document never says it.
     const [note] = await t.sql`select points from jarvis.prep_notes where key = ${`file:${SHA}`}`;
@@ -113,15 +114,17 @@ describe("prep job", () => {
     expect([again.summarized, again.summaryErrors, again.queued]).toEqual([0, 0, 0]);
   });
 
-  it("works without a model (no points) and sends tomorrow's list at 20:00 once", async () => {
-    const evening = new Date("2026-10-03T14:45:00.000Z"); // 20:15 IST
-    const s = await runClassPrep(t.sql, evening, null, log);
-    expect(s.evening).toBe(true);
+  it("leaves tomorrow's pre-reads to the evening check-in, sent once", async () => {
+    const evening = new Date("2026-10-03T15:05:00.000Z"); // 20:35 IST
+    expect((await runClassPrep(t.sql, evening, null, log)).queued).toBe(0);
+    const s = await runEvening(t.sql, evening, null, log);
+    expect(s.checkin).toBe(true);
     const [n] = await t.sql`select dedupe_key, text from jarvis.notifications`;
-    expect(n!.dedupe_key).toBe("class.eve:2026-10-04");
-    expect(n!.text).toContain("Tomorrow: 1 class");
-    expect(n!.text).toContain("PoC");
-    expect((await runClassPrep(t.sql, new Date(evening.getTime() + 10 * 60_000), null, log)).queued).toBe(0);
+    expect(n!.dedupe_key).toBe("checkin:2026-10-03");
+    expect(n!.text).toContain("Tomorrow (Sun 4 Oct): 1 class from 11:30 am");
+    expect(n!.text).toContain("📖 Pre-reads: PoC — none on the LMS");
+    expect(db.notificationMeta(String(n!.dedupe_key))).toEqual({ category: "brief", url: "/checkin" });
+    expect((await runEvening(t.sql, new Date(evening.getTime() + 15 * 60_000), null, log)).checkin).toBe(false);
   });
 
   it("formats a class with nothing linked", () => {
@@ -133,6 +136,5 @@ describe("prep job", () => {
       due: [],
     };
     expect(prepAlert(p, NOW).text).toBe("📖 <b>AOS · Session 12</b> at 11:30 am\nNo pre-read found on the LMS for this class.");
-    expect(eveningList("2026-10-04", [], NOW)).toBeNull();
   });
 });

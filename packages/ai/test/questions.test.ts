@@ -243,7 +243,7 @@ describe("the grounding guard", () => {
     effect: "read",
     run: async () => ({ today: "2026-10-01", professional: [{ rank: 1, id: 12, title: "Spinny deck", due: "today 6:00 pm", due_iso: "2026-10-01T12:30:00.000Z" }] }),
   };
-  const deps = (model: ModelProvider) => ({ sql: t.sql, model, channel: "web" as const, now: () => NOW, tools: [focus] });
+  const deps = (model: ModelProvider) => ({ sql: t.sql, model, channel: "web" as const, now: () => NOW, tools: [focus], situation: false });
   const rows = async () => (await t.sql`select role, parts, meta from jarvis.chat_messages order by id`).map((r) => ({ role: String(r.role), text: JSON.stringify(r.parts), meta: r.meta }));
 
   it("sends one correction for an unbacked date and stores only the repaired answer", async () => {
@@ -316,7 +316,7 @@ describe("memory in the chat prompt", () => {
     }
     try {
       const { model, requests } = scripted(say("Hello."));
-      await chat({ sql: t.sql, model, channel: "web", now: () => NOW, tools: [] }, "my MESA assignment and the Side project");
+      await chat({ sql: t.sql, model, channel: "web", now: () => NOW, tools: [], situation: false }, "my MESA assignment and the Side project");
       const added = requests[0]!.system.length - systemPrompt(NOW).length;
       expect(added).toBeGreaterThan(1000);
       expect(added).toBeLessThanOrEqual(8000);

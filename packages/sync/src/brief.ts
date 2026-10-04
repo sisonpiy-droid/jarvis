@@ -22,13 +22,13 @@ const NOTE_MAX = 600;
 const ALL_DAY_SHOWN = 3;
 const NO_PRIORITIES = "Nothing pressing at work today.";
 
-type SectionName = "priorities" | "personal" | "upcoming" | "goals" | "risks";
+type SectionName = "priorities" | "canWait" | "personal" | "upcoming" | "goals" | "risks";
 type Caps = Record<SectionName, number>;
-const SECTION_ORDER: SectionName[] = ["priorities", "personal", "upcoming", "goals", "risks"];
-const HEADINGS: Record<SectionName, string> = { priorities: "TODAY'S PRIORITIES", personal: "PERSONAL", upcoming: "UPCOMING", goals: "GOALS", risks: "RISKS" };
-const CAPS: Caps = { priorities: 3, personal: 6, upcoming: 6, goals: 5, risks: 5 };
+const SECTION_ORDER: SectionName[] = ["priorities", "canWait", "personal", "upcoming", "goals", "risks"];
+const HEADINGS: Record<SectionName, string> = { priorities: "TODAY'S PRIORITIES", canWait: "CAN WAIT", personal: "PERSONAL", upcoming: "UPCOMING", goals: "GOALS", risks: "RISKS" };
+const CAPS: Caps = { priorities: 3, canWait: 2, personal: 6, upcoming: 6, goals: 5, risks: 5 };
 /** When the brief is too long, the section showing the most lines loses one (ties in this order). */
-const TRIM_ORDER: SectionName[] = ["upcoming", "goals", "personal", "risks", "priorities"];
+const TRIM_ORDER: SectionName[] = ["canWait", "upcoming", "goals", "personal", "risks", "priorities"];
 
 interface Item {
   html: string;
@@ -90,6 +90,8 @@ function sectionItems(f: BriefFacts, s: BriefSections): Record<SectionName, Item
   const priorities = [...s.priorities, ...f.focus.filter((i) => i.task.domain === "professional" && i.score >= 1 && !top.has(i.task.id))];
   return {
     priorities: priorities.map((i, n) => ({ html: `${n + 1}. ${title(i.task.title)}${esc(dueText(i, now))}`, refs: [taskRef(i)] })),
+    // What a chief of staff would park today, with the reason (the focus score's defer candidates).
+    canWait: f.defer.filter((d) => !top.has(d.task.id)).map((d) => ({ html: `- ${title(d.task.title)} — ${esc(d.deferReason)}`, refs: [taskRef(d)] })),
     personal: [
       ...s.personal.habits.map(habitItem),
       ...s.personal.tasks.map((i) => ({ html: `- ${title(i.task.title)}${esc(dueText(i, now))}`, refs: [taskRef(i)] })),

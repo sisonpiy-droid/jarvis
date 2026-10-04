@@ -61,6 +61,10 @@ export function notificationMeta(dedupeKey: string): NotificationMeta {
       return { category: "material", url: "/" };
     case "brief":
       return { category: "brief", url: "/" };
+    case "checkin": // checkin:<YYYY-MM-DD> — the evening check-in
+      return { category: "brief", url: "/checkin" };
+    case "learned": // learned.memory:<day> / learned.quiet:<category>:<day> — what JARVIS learned, with undo
+      return { category: "system", url: event === "memory" ? "/settings/memory" : "/settings#learned" };
     case "draft": // draft.done:<draftId>
       return { category: "draft", url: path("/drafts", seg(dedupeKey, 1)) };
     case "user":

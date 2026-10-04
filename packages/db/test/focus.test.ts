@@ -28,6 +28,7 @@ const task = (o: Partial<Task> = {}): Task => ({
   createdAt: daysAgo(1),
   updatedAt: daysAgo(1),
   completedAt: null,
+  postponedCount: 0,
   ...o,
 });
 const ctx = (o: Partial<FocusCtx> = {}): FocusCtx => ({ now: NOW, today: "2026-10-01", goals: new Map(), freeMin: null, ...o });

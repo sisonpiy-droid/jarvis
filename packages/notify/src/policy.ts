@@ -51,7 +51,9 @@ export function route(n: { priority: Level; category: string }, s: NotificationS
 
   const r = s.routes[n.priority];
   const deliveries: RoutingDecision["deliveries"] = [];
-  const muted = s.mutedCategories.includes(n.category);
+  // Learned quiet: categories the owner keeps ignoring push no more — unless the item is high or urgent.
+  const learned = (s.learnedQuiet ?? []).includes(n.category) && (n.priority === "normal" || n.priority === "low");
+  const muted = s.mutedCategories.includes(n.category) || learned;
   const wantsPush = !muted && (r.push === "always" || (r.push === "daytime" && isDaytime(now, s)));
   if (wantsPush && avail.push) deliveries.push({ channel: "push", reason: "route" });
 

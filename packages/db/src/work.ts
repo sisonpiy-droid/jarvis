@@ -39,6 +39,8 @@ export interface Task {
   /** Last edit (any field); the focus score uses it to spot undated tasks nobody has touched. */
   updatedAt: string;
   completedAt: string | null;
+  /** Times the owner moved the due date later (MESA deadline changes don't count). */
+  postponedCount: number;
 }
 
 export interface Project {
@@ -92,6 +94,7 @@ const toTask = (r: R): Task => ({
   createdAt: iso(r.created_at)!,
   updatedAt: iso(r.updated_at ?? r.created_at)!,
   completedAt: iso(r.completed_at),
+  postponedCount: Number(r.postponed_count ?? 0),
 });
 
 const toProject = (r: R): Project => ({
@@ -246,11 +249,14 @@ export async function updateTask(sql: Sql, id: number, patch: TaskPatch): Promis
     next.goalId = patch.goalId;
   }
   const closing = next.status === "done" || next.status === "cancelled";
+  // The owner pushing their own open task later (MESA tasks follow the LMS and never count).
+  const postponed = cur.source !== "mesa" && !closing && !!cur.dueAt && !!next.dueAt && Date.parse(next.dueAt) > Date.parse(cur.dueAt);
   const completedAt = next.status === "done" ? (cur.status === "done" ? cur.completedAt : new Date().toISOString()) : null;
   await sql`
     update jarvis.tasks set title = ${next.title}, notes = ${next.notes}, priority = ${next.priority}, status = ${next.status},
            due_at = ${next.dueAt}, due_is_date_only = ${next.dueIsDateOnly}, is_next_action = ${closing ? false : next.isNextAction},
-           effort_min = ${next.effortMin}, project_id = ${next.projectId}, goal_id = ${next.goalId}, completed_at = ${completedAt}, updated_at = now()
+           effort_min = ${next.effortMin}, project_id = ${next.projectId}, goal_id = ${next.goalId}, completed_at = ${completedAt}, updated_at = now(),
+           postponed_count = postponed_count + ${postponed ? 1 : 0}, last_postponed_at = case when ${postponed} then now() else last_postponed_at end
      where id = ${id}`;
   if (cur.status !== next.status || cur.goalId !== next.goalId) await syncTaskActivity(sql, id);
   return getTask(sql, id);

@@ -78,7 +78,7 @@ describe("service worker", () => {
     const close = vi.fn();
     await sw.fire("notificationclick", { notification: { close, data: { url: "https://jarvis.app/drafts/5", ids: [5] } } });
     expect(close).toHaveBeenCalled();
-    expect(sw.fetchMock).toHaveBeenCalledWith("/api/notifications", expect.objectContaining({ method: "POST", body: JSON.stringify({ action: "read", ids: [5] }) }));
+    expect(sw.fetchMock).toHaveBeenCalledWith("/api/notifications", expect.objectContaining({ method: "POST", body: JSON.stringify({ action: "open", ids: [5] }) }));
     expect(win.focus).toHaveBeenCalled();
     expect(win.navigate).toHaveBeenCalledWith("https://jarvis.app/drafts/5");
     expect(sw.openWindow).not.toHaveBeenCalled();
@@ -95,7 +95,7 @@ describe("service worker", () => {
     const sw = loadServiceWorker();
     await sw.fire("notificationclick", { action: "habit-done", notification: { close: () => {}, data: { url: "https://jarvis.app/q/habit/7?d=2026-10-01", ids: [3] } } });
     expect(sw.fetchMock).toHaveBeenCalledWith("/api/habits/log", expect.objectContaining({ body: JSON.stringify({ id: 7, day: "2026-10-01", status: "done", source: "push_action" }) }));
-    expect(sw.fetchMock).toHaveBeenCalledWith("/api/notifications", expect.objectContaining({ body: JSON.stringify({ action: "read", ids: [3] }) }));
+    expect(sw.fetchMock).toHaveBeenCalledWith("/api/notifications", expect.objectContaining({ body: JSON.stringify({ action: "open", ids: [3] }) }));
     expect(sw.openWindow).not.toHaveBeenCalled();
   });
 
