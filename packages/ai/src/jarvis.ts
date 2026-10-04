@@ -93,12 +93,13 @@ export async function chat(deps: ChatDeps, userText: string): Promise<ChatResult
   const now = deps.now ?? (() => new Date());
   const { sql, channel } = deps;
   const at = now();
+  // The live situation (today, the week, risks, how the owner works) loads alongside history and memory; chat
+  // still works without it.
+  const situationP = deps.situation === false ? Promise.resolve(null) : loadSituation(sql, at).then((s) => s.text).catch(() => null);
   const history = await loadHistory(sql, channel);
   // Scoped memory: what this message and the last two user messages are about decides which notes load.
   const userTexts = history.filter((m) => m.role === "user").map((m) => textOf(m)).filter(Boolean);
-  const memories = await loadMemories(sql, await detectMemoryFocus(sql, [userText, ...userTexts.slice(-2).reverse()]));
-  // The live situation (today, the week, risks, how the owner works). Chat still works without it.
-  const situation = deps.situation === false ? null : await loadSituation(sql, at).then((s) => s.text).catch(() => null);
+  const [memories, situation] = await Promise.all([detectMemoryFocus(sql, [userText, ...userTexts.slice(-2).reverse()]).then((f) => loadMemories(sql, f)), situationP]);
   const system = systemPrompt(at, memories, situation);
   const tools = [...(deps.tools ?? jarvisTools(sql, now)), ...memoryTools(sql, now), weekPlanTool(sql, deps.model, now)];
   const message = userText.slice(0, 4000);
