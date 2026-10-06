@@ -29,7 +29,7 @@ const TABS = [
   ["/tasks", "Tasks", "✅"],
   ["/inbox", "Inbox", "🔔"],
   ["/chat", "Chat", "💬"],
-  ["/settings", "More", "⚙️"],
+  ["/more", "More", "☰"],
 ] as const;
 
 function Badge({ n }: { n: number }) {
@@ -43,7 +43,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="mx-auto max-w-5xl px-4 pb-24 md:pb-16">
       <PwaSetup />
-      <header className="flex flex-wrap items-center gap-x-6 gap-y-2 py-4 pt-[max(1rem,env(safe-area-inset-top))]">
+      <header className="flex flex-wrap items-center gap-x-6 gap-y-2 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] md:py-4">
         <Link href="/" className="text-lg font-semibold tracking-tight text-[var(--color-ink)] no-underline">
           JARVIS
         </Link>
@@ -61,33 +61,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </TabLink>
           ))}
         </nav>
-        <nav className="flex flex-wrap gap-3 text-sm md:hidden">
-          <Link href="/plan" className="text-[var(--color-muted)] no-underline">
-            Plan
-          </Link>
-          <Link href="/goals" className="text-[var(--color-muted)] no-underline">
-            Goals
-          </Link>
-          <Link href="/projects" className="text-[var(--color-muted)] no-underline">
-            Projects
-          </Link>
-          <Link href="/assignments" className="text-[var(--color-muted)] no-underline">
-            Assignments
-          </Link>
-          <Link href="/drafts" className="text-[var(--color-muted)] no-underline">
-            Drafts
-          </Link>
-          <Link href="/classes" className="text-[var(--color-muted)] no-underline">
-            Classes
-          </Link>
-          <Link href="/share" className="text-[var(--color-muted)] no-underline">
-            Share
-          </Link>
-          <Link href="/status" className="text-[var(--color-muted)] no-underline">
-            Status
-          </Link>
-        </nav>
-        <form action="/logout" method="post" className="ml-auto">
+        <form action="/logout" method="post" className="ml-auto hidden md:block">
           <button className="text-sm text-[var(--color-muted)] hover:text-[var(--color-ink)]">Sign out</button>
         </form>
       </header>

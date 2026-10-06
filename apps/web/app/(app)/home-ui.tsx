@@ -13,7 +13,7 @@ import { TaskRow } from "./tasks/task-ui";
 export function GlanceChips({ chips }: { chips: GlanceChip[] }) {
   if (!chips.length) return null;
   return (
-    <nav aria-label="At a glance" className="-mx-4 mt-3 flex snap-x gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0">
+    <nav aria-label="At a glance" className="scroll-x -mx-4 mt-3 flex snap-x gap-2 overflow-x-auto px-4 pb-1 md:mx-0 md:flex-wrap md:px-0">
       {chips.map((c) => (
         <Chip key={c.label} href={c.href} tone={c.tone}>
           {c.label}
@@ -57,7 +57,7 @@ export function PriorityList({ items, back, projects, empty }: { items: FocusIte
   return (
     <ul className="divide-y divide-[var(--color-line)]">
       {items.map((i, n) => (
-        <TaskRow key={i.task.id} t={i.task} back={back} projects={projects} rank={n + 1} hint={i.reasons.slice(0, 3).join(" · ")} menu />
+        <TaskRow key={i.task.id} t={i.task} back={back} projects={projects} rank={n + 1} hint={i.reasons.filter((r) => !/^(due |overdue|P[1-4]$|next action|in progress)/.test(r)).slice(0, 3).join(" · ") || undefined} menu />
       ))}
     </ul>
   );

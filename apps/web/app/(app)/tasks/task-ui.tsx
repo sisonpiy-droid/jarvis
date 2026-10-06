@@ -185,6 +185,10 @@ export function QuickAdd({ back, projects, projectId }: { back: string; projects
     <form action={addTask} className="flex flex-wrap items-end gap-2">
       <input type="hidden" name="back" value={back} />
       <input name="title" required maxLength={300} placeholder={projectId ? "Add a task to this project…" : "Add a task, e.g. Email Prof. Menon about the viva slot"} className={`${field} min-w-0 flex-[1_1_16rem]`} aria-label="New task" />
+      <button className={button}>Add</button>
+      <details className="w-full text-sm">
+        <summary className="cursor-pointer py-1 text-[var(--color-muted)]">Due date, effort, project…</summary>
+        <div className="mt-2 flex flex-wrap items-end gap-2">
       <input type="date" name="due_date" className={field} aria-label="Due date" />
       <input type="time" name="due_time" className={`${field} w-28`} aria-label="Due time (optional)" />
       <input type="number" name="effort_min" inputMode="numeric" min={1} max={600} step={1} placeholder="Effort (min)" className={`${field} w-32`} aria-label="Effort (min)" />
@@ -206,7 +210,8 @@ export function QuickAdd({ back, projects, projectId }: { back: string; projects
           <option value="personal">Personal</option>
         </select>
       )}
-      <button className={button}>Add</button>
+        </div>
+      </details>
     </form>
   );
 }
