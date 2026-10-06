@@ -17,3 +17,4 @@ export * from "./prep-notes";
 export * from "./media";
 export * from "./reflect";
 export * from "./week-plan";
+export * from "./docx";

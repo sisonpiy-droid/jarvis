@@ -29,6 +29,7 @@ export interface BotDeps {
   now?: () => Date;
 }
 
+const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 export const HELP = [
@@ -174,6 +175,16 @@ export async function handleUpdate(deps: BotDeps, update: TelegramUpdate): Promi
       { sql: deps.sql, model: deps.model, channel: "telegram", ...(deps.now ? { now: deps.now } : {}), tools: jarvisTools(deps.sql, deps.now, {
           ...(deps.requestDraft ? { requestDraft: deps.requestDraft } : {}),
           ...(deps.requestRevision ? { requestRevision: deps.requestRevision } : {}),
+          sendFile: async (bytes, filename, caption) => {
+            const form = new FormData();
+            form.append("chat_id", deps.ownerChatId);
+            form.append("caption", caption.slice(0, 1024));
+            form.append("document", new Blob([bytes as Uint8Array<ArrayBuffer>], { type: DOCX }), filename);
+            const res = await (deps.fetch ?? fetch)(`https://api.telegram.org/bot${deps.token}/sendDocument`, { method: "POST", body: form });
+            const json = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string };
+            if (!json.ok) throw new Error(`Telegram sendDocument failed: ${json.description ?? res.status}`);
+            return "Sent in this chat as a Word file.";
+          },
         }),
       },
       text,

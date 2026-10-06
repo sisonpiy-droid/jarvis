@@ -72,5 +72,12 @@ export async function runAgent(opts: {
     }
     turns.push({ role: "tool", parts: results });
   }
+  // Out of steps: answer from what was gathered instead of giving up.
+  const last = await opts.model.generate({ system: opts.system, messages: [...opts.history, ...turns], tools: decls, toolChoice: "none" }).catch(() => null);
+  const text = last && !toolCallsOf(last).length ? textOf(last) : "";
+  if (last && text) {
+    turns.push(last);
+    return { text, turns, toolCalls, toolResults };
+  }
   return { text: "That needed more steps than I allow in one reply — try asking more specifically.", turns, toolCalls, toolResults };
 }

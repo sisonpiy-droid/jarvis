@@ -4,9 +4,22 @@ import type { Sql } from "@jarvis/db";
 import { isSignedIn } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { requestDraft, requestRevision } from "@/lib/edge";
+import { storage } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // multi-step answers to complex questions (deliver uses 300 too)
+
+const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+/** A document made in chat: stored like any file and served by the signed-in /files/<sha> route. */
+async function saveChatFile(sql: Sql, origin: string, bytes: Uint8Array, name: string): Promise<string> {
+  const sha = Buffer.from(await crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>)).toString("hex");
+  const path = `chat/${sha}.docx`;
+  await storage().upload(path, bytes, DOCX);
+  await sql`insert into jarvis.files (sha256, storage_path, mime_type, size_bytes, original_filename, text_status)
+    values (${sha}, ${path}, ${DOCX}, ${bytes.length}, ${name}, 'unsupported') on conflict (sha256) do nothing`;
+  return `Download link (put it in the reply as a Markdown link): ${origin}/files/${sha}`;
+}
 
 const failed = (err: unknown) => NextResponse.json({ error: err instanceof Error ? err.message.slice(0, 200) : "Failed" }, { status: 500 });
 
@@ -37,7 +50,7 @@ export async function POST(req: NextRequest) {
         sql,
         model: new GeminiProvider(key, process.env.GEMINI_MODEL ?? "gemini-3.6-flash"),
         channel: "web",
-        tools: jarvisTools(sql, () => new Date(), { requestDraft, requestRevision: (id, text) => requestRevision(id, text, "chat") }),
+        tools: jarvisTools(sql, () => new Date(), { requestDraft, requestRevision: (id, text) => requestRevision(id, text, "chat"), sendFile: (bytes, name) => saveChatFile(sql, req.nextUrl.origin, bytes, name) }),
       },
       message,
     );

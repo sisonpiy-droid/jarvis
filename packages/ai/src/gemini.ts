@@ -97,7 +97,19 @@ export class GeminiProvider implements ModelProvider {
     return `${++this.replies}${Math.random().toString(36).slice(2, 8).padEnd(6, "0")}`;
   }
 
+  /** One retry after a timeout, a network error, 429 or 5xx — a single slow reply shouldn't lose an answer or a job. */
   async generate(req: GenerateRequest): Promise<Message> {
+    try {
+      return await this.once(req);
+    } catch (err) {
+      const msg = err instanceof Error ? `${err.name} ${err.message}` : String(err);
+      if (!/TimeoutError|AbortError|fetch failed|network|Gemini HTTP (429|5\d\d)/i.test(msg)) throw err;
+      await new Promise((r) => setTimeout(r, 1500));
+      return this.once(req);
+    }
+  }
+
+  private async once(req: GenerateRequest): Promise<Message> {
     const decls: GeminiFunctionDeclaration[] = req.tools;
     const body = {
       systemInstruction: { parts: [{ text: req.system }] },

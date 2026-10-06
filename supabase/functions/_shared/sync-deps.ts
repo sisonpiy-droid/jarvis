@@ -46,9 +46,9 @@ export function syncDeps(log: Logger): SyncDeps & { sql: Sql } {
     storage: new SupabaseStorage(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY")),
     log,
     icsUrl: Deno.env.get("GCAL_ICS_URL") ?? null,
-    // The brief's focus note: one 20-second call a day. BRIEF_AI=off (or no key) gives the fixed-template note.
+    // Job AI calls (brief note, prep, evening plan): 45 s each, one retry — fits every job lease. BRIEF_AI=off (or no key) gives the fixed-template note.
     model:
-      opt("GEMINI_API_KEY") && opt("BRIEF_AI") !== "off" ? new GeminiProvider(env("GEMINI_API_KEY"), opt("GEMINI_MODEL") ?? "gemini-3.6-flash", fetch, 20_000) : null,
+      opt("GEMINI_API_KEY") && opt("BRIEF_AI") !== "off" ? new GeminiProvider(env("GEMINI_API_KEY"), opt("GEMINI_MODEL") ?? "gemini-3.6-flash", fetch, 45_000) : null,
     // Auto-draft the backlog unless AUTO_DRAFT=off (and only when an AI key is configured).
     ...(Deno.env.get("GEMINI_API_KEY") && Deno.env.get("JARVIS_WEB_URL") && Deno.env.get("AUTO_DRAFT") !== "off"
       ? {
