@@ -1,6 +1,7 @@
 import * as db from "@jarvis/db";
 import type { Sql } from "@jarvis/db";
 import type { Tool } from "./agent";
+import { markdownToDocx } from "./docx";
 import { goalTools } from "./goal-tools";
 import { planningTools } from "./planning-tools";
 import { workTools } from "./work-tools";
@@ -63,6 +64,8 @@ export interface ToolOptions {
   requestDraft?: (assignmentId: string) => Promise<void>;
   /** Saves a standing instruction for an assignment and re-does it (it appears on the Drafts page; the owner gets a notification). */
   requestRevision?: (assignmentId: string, instruction: string) => Promise<void>;
+  /** Hands the owner a file on this surface (a Telegram document, or a download link on the web); returns what to tell them. */
+  sendFile?: (bytes: Uint8Array, filename: string, caption: string) => Promise<string>;
 }
 
 export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: ToolOptions = {}): Tool[] {
@@ -490,6 +493,29 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
         if ("candidates" in r) return { started: false, reason: "several match — ask which one", candidates: r.candidates };
         await requestRevision(String(r.one.sourceId), instruction);
         return { started: true, assignment: r.one.title, note: "Saved for this assignment. In 1–3 minutes the revised deliverables appear on the Drafts page; you'll get a notification." };
+      },
+    });
+  }
+  if (opts.sendFile) {
+    const sendFile = opts.sendFile;
+    tools.push({
+      name: "make_document",
+      effect: "write-local",
+      description:
+        "Turn notes, a summary, a cheat sheet or any answer into a Word document and give it to the owner. Use when they ask for a doc, PDF, file or something to download/print. Pass the FULL content as Markdown (headings, bullets, tables), not a pointer to an earlier message. Word only — it opens on any phone and can be saved as PDF from there.",
+      parameters: obj(
+        {
+          title: { type: "string", description: "Short document title, e.g. 'DDDM Excel formulas'" },
+          markdown: { type: "string", description: "The complete document body in Markdown" },
+        },
+        ["title", "markdown"],
+      ),
+      async run(a) {
+        const title = str(a.title).replace(/[\\/:*?"<>|\0\s]+/g, " ").trim().slice(0, 80) || "JARVIS notes";
+        const md = str(a.markdown);
+        if (md.trim().length < 20) throw new Error("markdown is required: pass the full document content");
+        const note = await sendFile(markdownToDocx(`# ${title}\n\n${md}`), `${title}.docx`, `📄 ${title}`);
+        return { sent: true, file: `${title}.docx`, note };
       },
     });
   }

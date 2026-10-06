@@ -79,6 +79,24 @@ const closeTurns = (r: AgentResult): Message[] => {
   return last?.role === "assistant" ? r.turns : [...r.turns, { role: "assistant", parts: [{ type: "text", text: r.text }] }];
 };
 
+/**
+ * What JARVIS sent the owner in the last 24 h (alerts, drafts, reminders, check-ins) — chat history doesn't hold
+ * them, so without this "leave it", "done" or "what was that?" have nothing to refer to.
+ */
+export async function recentAlerts(sql: Sql, at: Date): Promise<string | null> {
+  const rows = await sql`
+    select text, coalesce(sent_at, created_at) as at from jarvis.notifications
+    where status = 'sent' and coalesce(sent_at, created_at) between ${new Date(at.getTime() - 86_400_000)} and ${at}
+    order by coalesce(sent_at, created_at) desc limit 8`;
+  if (!rows.length) return null;
+  const when = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", hour: "numeric", minute: "2-digit" });
+  const line = (t: unknown) => String(t).replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim().slice(0, 300);
+  return [
+    "ALERTS YOU SENT THE OWNER (last 24 h, newest first). A short reply like \"leave it\", \"done\", \"don't submit\" or \"what was that?\" usually refers to the newest one:",
+    ...rows.map((r) => `- ${when.format(new Date(r.at as string))}: ${line(r.text)}`),
+  ].join("\n");
+}
+
 const MAX_REPAIR_STEPS = 3;
 /** Tool steps for one answer: complex questions (compare courses, plan the week) need several lookups. */
 const MAX_CHAT_STEPS = 12;
@@ -95,12 +113,14 @@ export async function chat(deps: ChatDeps, userText: string): Promise<ChatResult
   const at = now();
   // The live situation (today, the week, risks, how the owner works) loads alongside history and memory; chat
   // still works without it.
-  const situationP = deps.situation === false ? Promise.resolve(null) : loadSituation(sql, at).then((s) => s.text).catch(() => null);
+  const live = deps.situation !== false;
+  const situationP = live ? loadSituation(sql, at).then((s) => s.text).catch(() => null) : Promise.resolve(null);
+  const alertsP = live ? recentAlerts(sql, at).catch(() => null) : Promise.resolve(null);
   const history = await loadHistory(sql, channel);
   // Scoped memory: what this message and the last two user messages are about decides which notes load.
   const userTexts = history.filter((m) => m.role === "user").map((m) => textOf(m)).filter(Boolean);
-  const [memories, situation] = await Promise.all([detectMemoryFocus(sql, [userText, ...userTexts.slice(-2).reverse()]).then((f) => loadMemories(sql, f)), situationP]);
-  const system = systemPrompt(at, memories, situation);
+  const [memories, situation, alerts] = await Promise.all([detectMemoryFocus(sql, [userText, ...userTexts.slice(-2).reverse()]).then((f) => loadMemories(sql, f)), situationP, alertsP]);
+  const system = systemPrompt(at, memories, situation) + (alerts ? `\n\n${alerts}` : "");
   const tools = [...(deps.tools ?? jarvisTools(sql, now)), ...memoryTools(sql, now), weekPlanTool(sql, deps.model, now)];
   const message = userText.slice(0, 4000);
 
@@ -111,7 +131,7 @@ export async function chat(deps: ChatDeps, userText: string): Promise<ChatResult
   const evidence = (runs: AgentResult[]) =>
     evidenceFrom(
       [...runs.flatMap((r) => r.toolResults.map((x) => (x.ok ? x.result : x.error))), ...historyResults],
-      [message, ...userTexts, ...memories.memories.map((m) => `#${m.id}`), ...(situation ? [situation] : [])],
+      [message, ...userTexts, ...memories.memories.map((m) => `#${m.id}`), ...(situation ? [situation] : []), ...(alerts ? [alerts] : [])],
       at,
     );
 

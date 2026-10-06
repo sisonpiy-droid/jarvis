@@ -1,7 +1,7 @@
 import { strFromU8, unzipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { extractOfficeText } from "../../files/src/office-text";
-import { markdownToDocx, markdownToDocxXml } from "../src/docx";
+import { markdownToDocx, markdownToDocxXml } from "@jarvis/ai";
 import { DRAFT_SYSTEM, rankMaterials, stripLatex, summarize } from "../src/draft";
 
 const MD = `# Case — Draft

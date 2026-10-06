@@ -2,7 +2,7 @@ import { loadMemories, memoryBlock, textOf, type ModelProvider, type Part } from
 import type { Sql } from "@jarvis/db";
 import type { SupabaseStorage } from "@jarvis/files";
 import type { Logger } from "@jarvis/shared";
-import { markdownToDocx } from "./docx";
+import { markdownToDocx } from "@jarvis/ai";
 
 // Assignment drafting. The ORIGINAL brief and attachments always go to the
 // model in full (PDFs as the files themselves); relevant class material is
