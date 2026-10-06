@@ -73,3 +73,7 @@ html {
   border-radius: 4px;
   background: var(--color-line);
 }
+
+/* Swipeable chip rows: no scrollbar strip under them. */
+.scroll-x { scrollbar-width: none; }
+.scroll-x::-webkit-scrollbar { display: none; }

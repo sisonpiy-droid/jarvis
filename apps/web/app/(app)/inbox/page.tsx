@@ -12,14 +12,14 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
   const category = c && (NOTIFICATION_CATEGORIES as readonly string[]).includes(c) ? c : null;
   const items = await inbox(sql(), { category, unreadOnly: unread === "1", limit: 150 });
   const chip = (href: string, label: string, active: boolean) => (
-    <Link key={href} href={href} className={`rounded-full px-2.5 py-1 text-xs no-underline ${active ? "bg-[var(--color-accent)] text-white" : "bg-[var(--color-line)] text-[var(--color-muted)]"}`}>
+    <Link key={href} href={href} className={`shrink-0 rounded-full px-3 py-1.5 text-xs capitalize no-underline ${active ? "bg-[var(--color-accent)] text-white" : "bg-[var(--color-line)] text-[var(--color-muted)]"}`}>
       {label}
     </Link>
   );
   return (
     <main>
       <h1 className="text-2xl font-semibold tracking-tight">Inbox</h1>
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      <div className="scroll-x -mx-4 mt-3 flex gap-1.5 overflow-x-auto px-4 md:mx-0 md:flex-wrap md:px-0">
         {chip("/inbox", "All", !category && unread !== "1")}
         {chip("/inbox?unread=1", "Unread", unread === "1")}
         {NOTIFICATION_CATEGORIES.map((k) => chip(`/inbox?c=${k}`, k, category === k))}
