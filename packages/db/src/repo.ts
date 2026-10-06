@@ -43,6 +43,8 @@ export interface NotificationDraft {
   suppressed?: boolean;
   /** Dashboard deep link; derived from the dedupe key when omitted. */
   url?: string;
+  /** Stored files (sha256) to send along, e.g. a class deck — Telegram delivers them as documents. */
+  files?: string[];
 }
 
 export interface Integration {
@@ -184,8 +186,8 @@ export async function applyChanges(sql: Sql, cs: ChangeSet): Promise<{ newNotifi
     for (const n of cs.notifications) {
       const meta = notificationMeta(n.dedupeKey);
       const rows = await tx`
-        insert into jarvis.notifications (dedupe_key, priority, text, scheduled_for, status, category, url)
-        values (${n.dedupeKey}, ${n.priority}, ${n.text}, ${n.scheduledFor}, ${n.suppressed ? "suppressed" : "queued"}, ${meta.category}, ${n.url ?? meta.url})
+        insert into jarvis.notifications (dedupe_key, priority, text, scheduled_for, status, category, url, files)
+        values (${n.dedupeKey}, ${n.priority}, ${n.text}, ${n.scheduledFor}, ${n.suppressed ? "suppressed" : "queued"}, ${meta.category}, ${n.url ?? meta.url}, ${n.files?.length ? n.files : null})
         on conflict (dedupe_key) do nothing
         returning id`;
       if (rows.length && !n.suppressed) newNotifications++;

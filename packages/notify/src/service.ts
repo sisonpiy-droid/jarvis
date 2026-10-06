@@ -21,6 +21,8 @@ export interface NotifyChannels {
   email?: EmailConfig | null;
   /** Legacy channel, kept for rollback until Phase 11. */
   telegram?: Channel | null;
+  /** Loads an attached file (sha256) for Telegram; null when it can't be sent (missing, too big). */
+  file?: ((sha256: string) => Promise<{ bytes: Uint8Array; name: string; mime: string } | null>) | null;
 }
 
 export interface DispatchStats {
@@ -206,9 +208,9 @@ export async function runNotificationService(
     if (!ch.telegram || settings.telegram === "off") {
       await db.markDeliveriesSkipped(sql, tgs.map((t) => t.id), ch.telegram ? "telegram_off" : "not_configured");
     } else {
-      const byNotification = new Map(tgs.map((t) => [t.notification.id, t.id]));
+      const byNotification = new Map(tgs.map((t) => [t.notification.id, t]));
       for (const m of planMessages(tgs.map((t) => ({ id: t.notification.id, text: t.notification.text })))) {
-        const ids = m.ids.map((nid) => byNotification.get(nid)!);
+        const ids = m.ids.map((nid) => byNotification.get(nid)!.id);
         try {
           const id = await ch.telegram.send(m.text);
           await db.markDeliveriesSent(sql, ids, id);
@@ -217,6 +219,16 @@ export async function runNotificationService(
           log?.warn("telegram send failed", { error: err });
           await db.markDeliveriesAttemptFailed(sql, ids, message(err), TELEGRAM_MAX_ATTEMPTS);
           stats.telegram.failed += ids.length;
+          continue;
+        }
+        // Attached files follow the message. Best effort: the message is already out, so a failed file isn't retried.
+        for (const sha of new Set(m.ids.flatMap((nid) => byNotification.get(nid)!.notification.files ?? []))) {
+          try {
+            const f = await ch.file?.(sha);
+            if (f && ch.telegram.sendFile) await ch.telegram.sendFile(f.bytes, f.name, f.mime);
+          } catch (err) {
+            log?.warn("telegram file failed", { error: err });
+          }
         }
       }
     }

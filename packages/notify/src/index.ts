@@ -5,6 +5,8 @@
 export interface Channel {
   /** Sends one message; returns the provider's message id. */
   send(text: string): Promise<string>;
+  /** Sends one file (a class deck, a pre-read) after the message. */
+  sendFile?(bytes: Uint8Array, filename: string, mime: string): Promise<void>;
 }
 
 const TELEGRAM_LIMIT = 4096;
@@ -31,6 +33,15 @@ export class TelegramChannel implements Channel {
     // Never echo the URL: it contains the bot token.
     if (!res.ok || !body.ok) throw new Error(`Telegram sendMessage failed: HTTP ${res.status} ${body.description ?? ""}`.trim());
     return String(body.result?.message_id ?? "");
+  }
+
+  async sendFile(bytes: Uint8Array, filename: string, mime: string): Promise<void> {
+    const form = new FormData();
+    form.append("chat_id", this.chatId);
+    form.append("document", new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mime }), filename);
+    const res = await this.fetchImpl(`https://api.telegram.org/bot${this.token}/sendDocument`, { method: "POST", body: form });
+    const body = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string };
+    if (!res.ok || !body.ok) throw new Error(`Telegram sendDocument failed: HTTP ${res.status} ${body.description ?? ""}`.trim());
   }
 }
 

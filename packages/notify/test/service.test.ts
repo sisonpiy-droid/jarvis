@@ -68,6 +68,20 @@ describe("routing", () => {
     expect(items.map((i) => [i.category, i.url])).toEqual([["material", "/"], ["class", "/classes"]]);
   });
 
+  it("Telegram sends attached files after the message; a file that fails doesn't undo the delivery", async () => {
+    await db.enqueueNotifications(t.sql, [{ dedupeKey: "class.recap:e1:x", priority: "normal", text: "recap", scheduledFor: new Date(Date.now() - 1000).toISOString(), files: ["ok", "bad", "gone"] }]);
+    const sent: string[] = [];
+    const tg: Channel = { ...telegram, sendFile: async (_b, name) => void sent.push(name) };
+    const file = async (sha: string) => {
+      if (sha === "bad") throw new Error("storage down");
+      return sha === "ok" ? { bytes: new Uint8Array([1]), name: "Session 11 Deck.pdf", mime: "application/pdf" } : null;
+    };
+    await run({ telegram: tg, file }, noon);
+    expect(telegrams).toEqual(["recap"]);
+    expect(sent).toEqual(["Session 11 Deck.pdf"]);
+    expect((await deliveries()).map((d) => `${d.channel}:${d.status}`)).toEqual(["telegram:sent"]);
+  });
+
   it("with a push device: high → push only; Telegram stays quiet; inbox still gets it", async () => {
     await addDevice();
     await queue("assignment.created:a1", "high");

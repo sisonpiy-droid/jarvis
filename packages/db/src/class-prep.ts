@@ -46,6 +46,8 @@ export interface ClassPrep {
   items: PrepItem[];
   /** Open assignments of this course due from now until a day after the class. */
   due: Array<{ id: string; title: string; dueAt: string }>;
+  /** This session's recording, once it is on the LMS (needs a known session number). */
+  recording: { title: string; url: string | null } | null;
 }
 
 const SESSION_RE = /(?:^|[^a-z])sess(?:ion)?[\s_.#-]*0*(\d{1,3})(?!\d)/i;
@@ -115,11 +117,11 @@ export async function classPrep(sql: Sql, eventId: string, now: Date): Promise<C
     meetingLink: str(d.meetingLink),
     status: str(d.status),
   };
-  if (!event.courseId) return { event, session: null, match: "none", items: [], due: [] };
+  if (!event.courseId) return { event, session: null, match: "none", items: [], due: [], recording: null };
 
   const [recordings, sessions, materials, due] = await Promise.all([
     sql`
-      select title, coalesce(data ->> 'recordedOn', to_char(sort_at at time zone 'Asia/Kolkata', 'YYYY-MM-DD')) as day
+      select title, data ->> 'videoUrl' as url, coalesce(data ->> 'recordedOn', to_char(sort_at at time zone 'Asia/Kolkata', 'YYYY-MM-DD')) as day
         from jarvis.lms_items where kind = 'recording' and course_id = ${event.courseId} and removed_at is null`,
     sql`
       select sort_at from jarvis.lms_items
@@ -179,6 +181,8 @@ export async function classPrep(sql: Sql, eventId: string, now: Date): Promise<C
   }
   const items = picked.map(toItem).sort((a, b) => Number(b.preRead) - Number(a.preRead));
 
+  const rec = session != null ? recordings.find((r) => sessionNumber(String(r.title)) === session) : undefined;
+
   const keys = items.map((i) => i.noteKey).filter((k): k is string => !!k);
   if (keys.length) {
     const notes = await sql`select key, points from jarvis.prep_notes where key = any(${keys})`;
@@ -192,6 +196,7 @@ export async function classPrep(sql: Sql, eventId: string, now: Date): Promise<C
     match,
     items,
     due: due.map((a) => ({ id: String(a.source_id), title: String(a.title), dueAt: iso(a.sort_at)! })),
+    recording: rec ? { title: String(rec.title), url: str(rec.url) } : null,
   };
 }
 
