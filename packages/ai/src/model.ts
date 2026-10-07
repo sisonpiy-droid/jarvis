@@ -37,6 +37,8 @@ export interface GenerateRequest {
   temperature?: number;
   /** "none" forbids tool calls for this request even when tools are declared. */
   toolChoice?: "auto" | "none";
+  /** How much the model reasons before answering; less is faster. Provider default when omitted. */
+  thinking?: "minimal" | "low" | "medium" | "high";
 }
 
 export interface ModelProvider {

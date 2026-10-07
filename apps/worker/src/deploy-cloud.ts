@@ -120,7 +120,8 @@ const hook = await fetch(`https://api.telegram.org/bot${need("TELEGRAM_BOT_TOKEN
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
-    url: `https://${ref}.supabase.co/functions/v1/telegram-bot`,
+    // Run the bot next to the database (Mumbai): Telegram calls from Europe, and every query would cross continents.
+    url: `https://${ref}.supabase.co/functions/v1/telegram-bot?forceFunctionRegion=ap-south-1`,
     secret_token: need("TELEGRAM_WEBHOOK_SECRET"),
     allowed_updates: ["message"],
     drop_pending_updates: true,
