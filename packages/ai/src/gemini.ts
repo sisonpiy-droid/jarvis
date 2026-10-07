@@ -116,7 +116,11 @@ export class GeminiProvider implements ModelProvider {
       contents: toGeminiContents(req.messages),
       ...(decls.length ? { tools: [{ functionDeclarations: decls }] } : {}),
       ...(req.toolChoice === "none" ? { toolConfig: { functionCallingConfig: { mode: "NONE" } } } : {}),
-      generationConfig: { temperature: req.temperature ?? 0.4, ...(req.json ? { responseMimeType: "application/json" } : {}) },
+      generationConfig: {
+        temperature: req.temperature ?? 0.4,
+        ...(req.json ? { responseMimeType: "application/json" } : {}),
+        ...(req.thinking ? { thinkingConfig: { thinkingLevel: req.thinking } } : {}),
+      },
     };
     const res = await this.fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(this.model)}:generateContent`, {
       method: "POST",

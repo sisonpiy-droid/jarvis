@@ -1,4 +1,4 @@
-import { textOf, toolCallsOf, type Message, type ModelProvider, type Part, type ToolDecl } from "./model";
+import { textOf, toolCallsOf, type GenerateRequest, type Message, type ModelProvider, type Part, type ToolDecl } from "./model";
 
 // The tool-calling loop. Tools are the only way the model touches data, and
 // each declares what it may do: "read" (free), "write-local" (free, logged —
@@ -31,6 +31,7 @@ export async function runAgent(opts: {
   user: Part[];
   tools: Tool[];
   maxSteps?: number;
+  thinking?: GenerateRequest["thinking"];
   toolChoice?: "auto" | "none";
 }): Promise<AgentResult> {
   const decls: ToolDecl[] = opts.tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }));
@@ -45,6 +46,7 @@ export async function runAgent(opts: {
       messages: [...opts.history, ...turns],
       tools: decls,
       ...(opts.toolChoice ? { toolChoice: opts.toolChoice } : {}),
+      ...(opts.thinking ? { thinking: opts.thinking } : {}),
     });
     turns.push(reply);
     const calls = toolCallsOf(reply);
@@ -52,11 +54,17 @@ export async function runAgent(opts: {
       return { text: textOf(reply) || "I couldn't come up with an answer to that.", turns, toolCalls, toolResults };
     }
     const results: Part[] = [];
-    for (const call of calls) {
+    const exec = (call: (typeof calls)[number]) => {
       const tool = byName.get(call.name);
+      return tool ? tool.run(call.args).then((v) => ({ v }), (e: unknown) => ({ e })) : Promise.resolve({ e: new Error(`unknown tool ${call.name}`) as unknown });
+    };
+    // Lookups in one step run in parallel; any write keeps the model's order.
+    const outs: Array<{ v?: unknown; e?: unknown }> = calls.every((c) => byName.get(c.name)?.effect === "read") ? await Promise.all(calls.map(exec)) : [];
+    if (!outs.length) for (const c of calls) outs.push(await exec(c));
+    for (const [i, call] of calls.entries()) {
       try {
-        if (!tool) throw new Error(`unknown tool ${call.name}`);
-        const out = await tool.run(call.args);
+        if ("e" in outs[i]!) throw outs[i]!.e;
+        const out = outs[i]!.v;
         let json = JSON.stringify(out ?? null);
         if (json.length > MAX_TOOL_RESULT_CHARS) json = JSON.stringify({ truncated: true, partial: json.slice(0, MAX_TOOL_RESULT_CHARS) });
         const result: unknown = JSON.parse(json);
@@ -73,7 +81,7 @@ export async function runAgent(opts: {
     turns.push({ role: "tool", parts: results });
   }
   // Out of steps: answer from what was gathered instead of giving up.
-  const last = await opts.model.generate({ system: opts.system, messages: [...opts.history, ...turns], tools: decls, toolChoice: "none" }).catch(() => null);
+  const last = await opts.model.generate({ system: opts.system, messages: [...opts.history, ...turns], tools: decls, toolChoice: "none", ...(opts.thinking ? { thinking: opts.thinking } : {}) }).catch(() => null);
   const text = last && !toolCallsOf(last).length ? textOf(last) : "";
   if (last && text) {
     turns.push(last);
