@@ -4,7 +4,7 @@ import { estimateSession, sessionNumber } from "@jarvis/db";
 import { createLogger } from "@jarvis/shared";
 import { createTestDb, type TestDb } from "../../db/test/harness";
 import { say, scripted } from "../../ai/test/scripted";
-import { prepAlert, runClassPrep } from "../src/class-prep";
+import { prepAlert, RECAP_WAIT_MS, runClassPrep } from "../src/class-prep";
 import { runEvening } from "../src/evening";
 
 // Pre-class prep against the real migrations (in-process Postgres): which session a class is, which pre-read
@@ -107,6 +107,8 @@ describe("prep job", () => {
     expect(n!.text).toContain("Pre-read: PreRead_Session 11_Groww");
     expect(n!.text).toContain("• Groww reached 10 million users.");
     expect(n!.text).toContain("Due");
+    const [f] = await t.sql`select files from jarvis.notifications`;
+    expect(f!.files).toEqual([SHA]); // the pre-read itself goes along
     expect(db.notificationMeta(String(n!.dedupe_key)).url).toBe("/classes/e2");
 
     // Again five minutes later: no AI call (the scripted model has no replies left) and no second push.
@@ -116,15 +118,42 @@ describe("prep job", () => {
 
   it("leaves tomorrow's pre-reads to the evening check-in, sent once", async () => {
     const evening = new Date("2026-10-03T15:05:00.000Z"); // 20:35 IST
-    expect((await runClassPrep(t.sql, evening, null, log)).queued).toBe(0);
+    // Only this morning's recap (no AI key: without points); no pre-class push in the evening.
+    expect(await runClassPrep(t.sql, evening, null, log)).toMatchObject({ alerts: 0, recaps: 1 });
     const s = await runEvening(t.sql, evening, null, log);
     expect(s.checkin).toBe(true);
-    const [n] = await t.sql`select dedupe_key, text from jarvis.notifications`;
+    const [n] = await t.sql`select dedupe_key, text from jarvis.notifications where dedupe_key like 'checkin:%'`;
     expect(n!.dedupe_key).toBe("checkin:2026-10-03");
     expect(n!.text).toContain("Tomorrow (Sun 4 Oct): 1 class from 11:30 am");
     expect(n!.text).toContain("📖 Pre-reads: PoC — none on the LMS");
     expect(db.notificationMeta(String(n!.dedupe_key))).toEqual({ category: "brief", url: "/checkin" });
     expect((await runEvening(t.sql, new Date(evening.getTime() + 15 * 60_000), null, log)).checkin).toBe(false);
+  });
+
+  it("after class: waits for the recording, then sends revision points, the material and the recording — once", async () => {
+    const after = new Date("2026-10-03T06:00:00.000Z"); // 11:30 IST, class (8:30–10:00) ended 1.5 h ago
+    expect((await runClassPrep(t.sql, after, null, log)).recaps).toBe(0); // no recording yet, not waited long enough
+    await item("recording", "r11", "Session 11", { recordedOn: "2026-10-03", videoUrl: "https://youtube.com/live/abc" }, "2026-10-03T05:30:00Z", "c1");
+    const { model, requests } = scripted(say(JSON.stringify({ points: ["Groww reached 10 million users.", "Retention by cohort is the key question.", "Churn fell 40%."] })));
+    const s = await runClassPrep(t.sql, after, model, log);
+    expect([s.recaps, s.summarized]).toEqual([1, 1]);
+    expect(requests[0]!.system).toContain("revision notes");
+    const [n] = await t.sql`select dedupe_key, priority, text, files from jarvis.notifications where dedupe_key like 'class.recap:%'`;
+    expect(n!.dedupe_key).toBe("class.recap:e2:2026-10-03T03:00:00.000Z");
+    expect(n!.text).toBe(
+      [
+        "📝 <b>DDDM · Session 11 — recap</b>",
+        "• Groww reached 10 million users.",
+        "• Retention by cohort is the key question.", // the invented 40% is dropped
+        "📎 PreRead_Session 11_Groww",
+        "📎 Session 11 Workbook",
+        '🎥 <a href="https://youtube.com/live/abc">Recording: Session 11</a>',
+      ].join("\n"),
+    );
+    expect(n!.files).toEqual([SHA]);
+    expect(db.notificationMeta(String(n!.dedupe_key)).url).toBe("/classes/e2");
+    // Never twice, and no second AI call.
+    expect((await runClassPrep(t.sql, new Date(after.getTime() + RECAP_WAIT_MS), model, log)).recaps).toBe(0);
   });
 
   it("formats a class with nothing linked", () => {
@@ -134,6 +163,7 @@ describe("prep job", () => {
       match: "none",
       items: [],
       due: [],
+      recording: null,
     };
     expect(prepAlert(p, NOW).text).toBe("📖 <b>AOS · Session 12</b> at 11:30 am\nNo pre-read found on the LMS for this class.");
   });

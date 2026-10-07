@@ -49,8 +49,8 @@ export function notificationMeta(dedupeKey: string): NotificationMeta {
       return { category: "deadline", url: path("/assignments", seg(dedupeKey, 1)) };
     case "assignment":
       return { category: event === "deadline_changed" ? "deadline" : "assignment", url: event === "removed" ? "/assignments" : path("/assignments", seg(dedupeKey, 1)) };
-    case "class": // class.prep:<eventId>:<start> → that class's prep page
-      return { category: "class", url: event === "prep" ? path("/classes", seg(dedupeKey, 1)) : "/classes" };
+    case "class": // class.prep / class.recap:<eventId>:<start> → that class's page
+      return { category: "class", url: event === "prep" || event === "recap" ? path("/classes", seg(dedupeKey, 1)) : "/classes" };
     case "gcal":
       return { category: "calendar", url: "/classes" };
     case "announcement":

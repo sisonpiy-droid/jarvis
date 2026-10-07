@@ -15,6 +15,8 @@ export interface RoutableNotification {
   category: string;
   url: string;
   createdAt: string;
+  /** Attached files (sha256), loaded with pending deliveries. */
+  files?: string[];
 }
 
 const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
@@ -29,6 +31,7 @@ const toRoutable = (r: Record<string, unknown>): RoutableNotification => {
     category: (r.category as string | null) ?? meta.category,
     url: (r.url as string | null) ?? meta.url,
     createdAt: iso(r.created_at)!,
+    ...(Array.isArray(r.files) && r.files.length ? { files: r.files.map(String) } : {}),
   };
 };
 
@@ -74,7 +77,7 @@ export interface PendingDelivery {
 
 export async function pendingDeliveries(sql: Sql, channel: DeliveryChannel, limit = 50): Promise<PendingDelivery[]> {
   const rows = await sql`
-    select d.id as delivery_id, d.attempts, d.reason, n.id, n.dedupe_key, n.priority, n.text, n.category, n.url, n.created_at
+    select d.id as delivery_id, d.attempts, d.reason, n.id, n.dedupe_key, n.priority, n.text, n.category, n.url, n.created_at, n.files
       from jarvis.notification_deliveries d join jarvis.notifications n on n.id = d.notification_id
      where d.channel = ${channel} and d.status = 'pending'
      order by case n.priority when 'urgent' then 0 when 'high' then 1 when 'normal' then 2 else 3 end, d.id

@@ -14,6 +14,17 @@ import { istHour } from "./time";
 // under its own lease lock and reports to jarvis.jobs (heartbeat) and jarvis.job_runs (history). A failure in
 // one job never blocks the others.
 
+/** Telegram bots can send documents up to 50 MB. */
+const TELEGRAM_FILE_MAX = 45_000_000;
+
+/** A stored file (class deck, pre-read) for Telegram, or null when it's missing or too big to send. */
+async function storedFile(deps: SyncDeps, sha: string) {
+  if (!deps.storage?.download) return null;
+  const [f] = await deps.sql`select storage_path, mime_type, original_filename, size_bytes from jarvis.files where sha256 = ${sha}`;
+  if (!f || Number(f.size_bytes) > TELEGRAM_FILE_MAX) return null;
+  return { bytes: await deps.storage.download(String(f.storage_path)), name: String(f.original_filename || `${sha.slice(0, 12)}.bin`), mime: String(f.mime_type || "application/octet-stream") };
+}
+
 export const JOB_NAMES = ["mesa", "calendar", "notify", "briefs", "drafts", "habits", "engine", "prep", "evening", "health"] as const;
 export type JobName = (typeof JOB_NAMES)[number];
 export const isJobName = (s: string): s is JobName => (JOB_NAMES as readonly string[]).includes(s);
@@ -126,7 +137,7 @@ export const jobBodies: Record<JobName, (deps: SyncDeps, opts: SyncOptions, now:
     if (opts.send === false) return { status: "idle", stats: { sending: false } };
     const s = await runNotificationService(
       deps.sql,
-      { baseUrl: deps.notify?.baseUrl ?? "", vapid: deps.notify?.vapid ?? null, email: deps.notify?.email ?? null, telegram: deps.channel },
+      { baseUrl: deps.notify?.baseUrl ?? "", vapid: deps.notify?.vapid ?? null, email: deps.notify?.email ?? null, telegram: deps.channel, file: (sha) => storedFile(deps, sha) },
       { now, log: deps.log, ...(deps.fetch ? { fetch: deps.fetch } : {}) },
     );
     const sent = s.push.sent + s.email.sent + s.telegram.sent;
