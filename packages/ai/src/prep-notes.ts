@@ -40,6 +40,7 @@ export async function prepPoints(model: ModelProvider, title: string, text: stri
     tools: [],
     json: true,
     temperature: 0.2,
+    task: kind === "recap" ? "recap" : "prep_points",
   });
   let parsed: unknown;
   try {

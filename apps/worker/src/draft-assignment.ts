@@ -1,4 +1,4 @@
-import { GeminiProvider } from "@jarvis/ai";
+import { GeminiProvider, meterTo } from "@jarvis/ai";
 import { draftAssignment, telegramSender } from "@jarvis/assist";
 import { connect } from "@jarvis/db";
 import { SupabaseStorage } from "@jarvis/files";
@@ -19,7 +19,7 @@ try {
   const tg = telegramSender(need("TELEGRAM_BOT_TOKEN"), need("TELEGRAM_CHAT_ID"));
   const t0 = Date.now();
   const out = await draftAssignment(
-    { sql, storage: new SupabaseStorage(need("SUPABASE_URL"), need("SUPABASE_SECRET_KEY")), model: new GeminiProvider(need("GEMINI_API_KEY"), model, fetch, 180_000), modelName: model, sendMessage: tg.sendMessage, sendDocument: tg.sendDocument, log: createLogger("draft") },
+    { sql, storage: new SupabaseStorage(need("SUPABASE_URL"), need("SUPABASE_SECRET_KEY")), model: new GeminiProvider(need("GEMINI_API_KEY"), model, fetch, 180_000, meterTo(sql)), modelName: model, sendMessage: tg.sendMessage, sendDocument: tg.sendDocument, log: createLogger("draft") },
     String(r.one.sourceId),
     "request",
   );

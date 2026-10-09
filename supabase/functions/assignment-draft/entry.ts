@@ -2,7 +2,7 @@
 // Called (fire-and-forget) by mesa-sync for new assignments and by the bot
 // for /draft. Bundled by `npm run edge:build` into index.js.
 
-import { GeminiProvider } from "@jarvis/ai";
+import { GeminiProvider, meterTo } from "@jarvis/ai";
 import { draftAssignment, telegramSender } from "@jarvis/assist";
 import { connect } from "@jarvis/db";
 import { SupabaseStorage } from "@jarvis/files";
@@ -36,7 +36,7 @@ async function run(assignmentId: string, trigger: "auto" | "request") {
       {
         sql,
         storage: new SupabaseStorage(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY")),
-        model: new GeminiProvider(env("GEMINI_API_KEY"), modelName, fetch, 140_000),
+        model: new GeminiProvider(env("GEMINI_API_KEY"), modelName, fetch, 140_000, meterTo(sql)),
         modelName,
         sendMessage: tg.sendMessage,
         sendDocument: tg.sendDocument,

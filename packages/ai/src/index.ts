@@ -18,3 +18,7 @@ export * from "./media";
 export * from "./reflect";
 export * from "./week-plan";
 export * from "./docx";
+export * from "./material-search";
+export * from "./email-tools";
+export * from "./clean-data";
+export * from "./google-calendar";

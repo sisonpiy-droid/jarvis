@@ -61,6 +61,8 @@ export function notificationMeta(dedupeKey: string): NotificationMeta {
       return { category: "material", url: "/" };
     case "brief":
       return { category: "brief", url: "/" };
+    case "week": // week.ahead:<YYYY-MM-DD> — Monday morning: what's due before Friday
+      return { category: "brief", url: "/plan" };
     case "plan": // plan:<YYYY-MM-DD> — the Sunday week plan, to approve
       return { category: "brief", url: "/plan" };
     case "checkin": // checkin:<YYYY-MM-DD> — the evening check-in

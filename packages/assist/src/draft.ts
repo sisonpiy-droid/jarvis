@@ -204,7 +204,7 @@ export async function draftAssignment(deps: DraftDeps, assignmentId: string, tri
     // 4. Draft.
     // Preferences, personal context and the MESA notes (general ones, then this course's), in a smaller budget.
     const memories = await loadMemories(sql, { mesa: true, courseIds: a.courseId ? [String(a.courseId)] : [] }, { factsCap: 10, budgetChars: 4000 }).catch(() => ({ memories: [], omitted: 0 }));
-    const reply = await deps.model.generate({ system: DRAFT_SYSTEM + memoryBlock(memories), messages: [{ role: "user", parts }], tools: [] });
+    const reply = await deps.model.generate({ system: DRAFT_SYSTEM + memoryBlock(memories), messages: [{ role: "user", parts }], tools: [], task: "draft_assignment" });
     const md = stripLatex(textOf(reply));
     if (md.length < 200) throw new Error("the model returned an unusually short draft");
 

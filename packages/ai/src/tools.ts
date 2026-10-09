@@ -1,8 +1,12 @@
 import * as db from "@jarvis/db";
 import type { Sql } from "@jarvis/db";
 import type { Tool } from "./agent";
+import { cleanedCsv, cleanTable, MAX_ROWS, readTable } from "./clean-data";
 import { markdownToDocx } from "./docx";
+import { emailTools } from "./email-tools";
 import { goalTools } from "./goal-tools";
+import { eventId, type GoogleCalendar } from "./google-calendar";
+import { findPassages, searchTerms } from "./material-search";
 import { planningTools } from "./planning-tools";
 import { workTools } from "./work-tools";
 
@@ -65,7 +69,11 @@ export interface ToolOptions {
   /** Saves a standing instruction for an assignment and re-does it (it appears on the Drafts page; the owner gets a notification). */
   requestRevision?: (assignmentId: string, instruction: string) => Promise<void>;
   /** Hands the owner a file on this surface (a Telegram document, or a download link on the web); returns what to tell them. */
-  sendFile?: (bytes: Uint8Array, filename: string, caption: string) => Promise<string>;
+  sendFile?: (bytes: Uint8Array, filename: string, caption: string, mime?: string) => Promise<string>;
+  /** Reads a stored file by file_id (for cleaning); null when it isn't there. */
+  readFile?: (fileId: string) => Promise<{ bytes: Uint8Array; name: string } | null>;
+  /** The owner's Google Calendar, once connected (null/absent until then). */
+  calendar?: GoogleCalendar | null;
 }
 
 export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: ToolOptions = {}): Tool[] {
@@ -182,6 +190,34 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
           items: items.map((r) => ({ kind: r.kind, id: r.source_id, title: r.title, course: r.course_title, topic: r.topic, date: fmt(r.sort_at?.toISOString?.() ?? r.sort_at) })),
           file_matches: files.map((f) => ({ file: f.original_filename, file_id: f.sha256, snippet: f.snippet })),
         };
+      },
+    },
+    {
+      name: "find_in_materials",
+      effect: "read",
+      description:
+        "Find where the owner's course material (slides, readings, workbooks, files they shared) answers a question or covers a topic. Returns the matching passages with the file name and the page / slide / sheet. Use FIRST for any question about what was taught or what a document says. If found is false, the material doesn't cover it: say so and stop.",
+      parameters: obj({ query: { type: "string", description: "The question or the key terms, e.g. 'CAC payback formula'" } }, ["query"]),
+      async run(a) {
+        const terms = searchTerms(str(a.query));
+        if (!terms.length) throw new Error("query has no searchable words — ask what exactly to look for");
+        const rows = await sql`
+          select f.sha256, f.original_filename, f.text_content,
+                 (select c.title from jarvis.item_files i
+                    join jarvis.lms_items m on m.kind = 'material' and m.source_id = i.item_id
+                    join jarvis.lms_items c on c.kind = 'course' and c.source_id = m.course_id
+                   where i.sha256 = f.sha256 limit 1) as course
+            from jarvis.files f
+           where f.text_status = 'done' and f.text_content ilike any(${terms.map(like)})
+           limit 80`;
+        const passages = findPassages(
+          rows.map((r) => ({ fileId: String(r.sha256), name: String(r.original_filename ?? "file"), course: (r.course as string | null) ?? null, text: String(r.text_content) })),
+          terms,
+        );
+        if (!passages.length) {
+          return { found: false, searched_terms: terms, note: "Not in the owner's course material. Tell them it isn't there and stop — no general-knowledge answer, no guess." };
+        }
+        return { found: true, passages: passages.map((p) => ({ file: p.file, location: p.location, course: p.course, text: p.text, file_id: p.fileId })) };
       },
     },
     {
@@ -450,6 +486,18 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
         return { scheduled_for: fmt(scheduledFor), scheduled_for_iso: scheduledFor };
       },
     },
+    {
+      name: "get_costs",
+      effect: "read",
+      description: "What JARVIS's own AI calls cost (estimated at paid prices; the free tier is free): spend today, last 7 days and overall, each by task, and the most expensive task. Use for 'what have I spent today?', 'what's my most expensive task?'.",
+      parameters: obj({}),
+      async run() {
+        const s = await db.costSummary(sql, now());
+        const win = (w: db.CostWindow) => ({ calls: w.calls, tokens: w.tokens, usd: Number(w.usd.toFixed(4)), by_task: w.byTask.map((t) => ({ task: t.task, calls: t.calls, tokens: t.inputTokens + t.outputTokens, usd: Number(t.usd.toFixed(4)) })) });
+        return { today: win(s.today), last_7_days: win(s.week), all_time: win(s.all), most_expensive_task: s.topTask ? { task: s.topTask.task, usd: Number(s.topTask.usd.toFixed(4)) } : null, since: s.since };
+      },
+    },
+    ...emailTools(sql),
     ...workTools(sql, now),
     ...goalTools(sql, now),
     ...planningTools(sql, now),
@@ -496,6 +544,47 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
       },
     });
   }
+  tools.push({
+    name: "add_calendar_event",
+    effect: "write-calendar",
+    description:
+      "Add an event to the owner's own Google Calendar right now: block time, add a study session or meeting. ONLY when the owner explicitly asks you to block time or add something to their calendar — never on your own initiative. start/end are ISO date-times with +05:30; give end or minutes (default 60). It checks for clashes with their classes and events first.",
+    parameters: obj(
+      {
+        title: { type: "string" },
+        start: { type: "string", description: "ISO date-time, e.g. 2026-10-12T15:00:00+05:30" },
+        end: { type: "string", description: "ISO date-time (or use minutes)" },
+        minutes: { type: "integer", description: "Length if no end (default 60, max 720)" },
+        notes: { type: "string" },
+        allow_overlap: { type: "boolean", description: "Only after the owner confirmed they want it despite the clash" },
+      },
+      ["title", "start"],
+    ),
+    async run(a) {
+      const title = str(a.title).slice(0, 200);
+      const start = new Date(str(a.start));
+      if (!title) throw new Error("title is required");
+      if (Number.isNaN(start.getTime())) throw new Error("start must be an ISO date-time like 2026-10-12T15:00:00+05:30");
+      const end = a.end ? new Date(str(a.end)) : new Date(start.getTime() + clampInt(a.minutes, 15, 720, 60) * 60_000);
+      if (Number.isNaN(end.getTime()) || end <= start) throw new Error("end must be after start");
+      if (end.getTime() - start.getTime() > 12 * 3_600_000) throw new Error("an event can be at most 12 hours");
+      if (start.getTime() < now().getTime() - 5 * 60_000 || start.getTime() > now().getTime() + 366 * 86_400_000) throw new Error("start must be between now and a year ahead");
+      if (!opts.calendar) {
+        return { added: false, reason: "Google Calendar isn't connected yet. One-time setup on the owner's laptop: add a Google OAuth client to .env, run `npm run google:auth`, then `npm run deploy:cloud` (see docs/GOOGLE_CALENDAR.md). Tell them this; nothing was added." };
+      }
+      const startIso = start.toISOString();
+      const endIso = end.toISOString();
+      if (a.allow_overlap !== true) {
+        const near = await db.calendarBetween(sql, new Date(start.getTime() - 8 * 3_600_000).toISOString(), endIso);
+        const clashes = near.filter((e) => !e.cancelled && !e.allDay && e.startAt < endIso && (e.endAt ?? new Date(Date.parse(e.startAt) + 3_600_000).toISOString()) > startIso);
+        if (clashes.length) {
+          return { added: false, clashes: clashes.map((e) => ({ title: e.title, starts: fmt(e.startAt), ends: e.endAt ? fmt(e.endAt) : null })), note: "That overlaps. Tell the owner what it clashes with and ask; only call again with allow_overlap if they confirm." };
+        }
+      }
+      const r = await opts.calendar.createEvent({ id: await eventId(title, startIso, endIso), title, startIso, endIso, ...(str(a.notes) ? { notes: str(a.notes).slice(0, 2000) } : {}) });
+      return { added: true, already_there: r.duplicate, title, starts: fmt(startIso), ends: fmt(endIso), link: r.link };
+    },
+  });
   if (opts.sendFile) {
     const sendFile = opts.sendFile;
     tools.push({
@@ -516,6 +605,40 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
         if (md.trim().length < 20) throw new Error("markdown is required: pass the full document content");
         const note = await sendFile(markdownToDocx(`# ${title}\n\n${md}`), `${title}.docx`, `📄 ${title}`);
         return { sent: true, file: `${title}.docx`, note };
+      },
+    });
+  }
+  if (opts.readFile && opts.sendFile) {
+    const { readFile, sendFile } = opts;
+    tools.push({
+      name: "clean_data",
+      effect: "write-local",
+      description:
+        "Clean a spreadsheet or CSV the owner shared (by file_id): fixes spacing, case, dates, numbers, emails and phone numbers, removes blank rows and exact duplicates, and FLAGS every row it isn't sure about instead of guessing. Sends the cleaned file back with a 'needs review' column. Use for 'clean this up', 'tidy this sheet', 'fix this data'.",
+      parameters: obj({ file_id: { type: "string", description: "From the 'Shared file' line" } }, ["file_id"]),
+      async run(a) {
+        const f = await readFile(str(a.file_id));
+        if (!f) return { cleaned: false, reason: "no such file" };
+        const table = readTable(f.bytes, f.name);
+        if (!table) return { cleaned: false, reason: "I can clean CSV and Excel (.xlsx) files; this is a different kind of file." };
+        if (table.length > MAX_ROWS + 1) return { cleaned: false, reason: `That's ${table.length - 1} rows; I clean up to ${MAX_ROWS} at a time. Split the file.` };
+        const res = cleanTable(table);
+        if (!res.rows.length) return { cleaned: false, reason: "There are no data rows under the header." };
+        const base = f.name.replace(/\.[a-z0-9]+$/i, "");
+        const flagged = res.rows.filter((r) => r.flags.length);
+        await sendFile(new TextEncoder().encode(cleanedCsv(res)), `${base}-cleaned.csv`, `🧹 ${base}: ${res.rows.length} rows, ${flagged.length} need a look`, "text/csv");
+        return {
+          cleaned: true,
+          file: `${base}-cleaned.csv`,
+          rows_in: res.rowsIn,
+          rows_out: res.rows.length,
+          blank_rows_removed: res.blankRemoved,
+          exact_duplicates_removed: res.duplicatesRemoved.slice(0, 10),
+          cells_changed: res.cellsChanged,
+          flagged_rows: flagged.length,
+          flagged: flagged.slice(0, 25).map((r) => ({ row: r.row, why: r.flags })),
+          note: "The cleaned file was sent; flagged rows are marked in its 'needs review' column. Report the counts, then list the flagged rows (row number and reason). Never guess the right value for a flagged cell.",
+        };
       },
     });
   }

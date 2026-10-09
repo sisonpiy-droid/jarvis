@@ -51,6 +51,7 @@ export async function learnFromMessages(sql: Sql, model: ModelProvider, messages
     tools: [],
     json: true,
     temperature: 0.1,
+    task: "learning",
   });
   let parsed: unknown;
   try {

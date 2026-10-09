@@ -46,6 +46,7 @@ export async function transcribeAudio(model: ModelProvider, audio: string, mimeT
       messages: [{ role: "user", parts: [{ type: "file", mimeType, data: audio }, { type: "text", text: "Transcribe this voice note." }] }],
       tools: [],
       temperature: 0,
+      task: "voice",
     });
   } catch (err) {
     // An empty reply is how the model sometimes says "nothing was said".
@@ -63,6 +64,7 @@ export async function readImage(model: ModelProvider, image: string, mimeType: s
     messages: [{ role: "user", parts: [{ type: "file", mimeType, data: image }, { type: "text", text: "Read this image." }] }],
     tools: [],
     temperature: 0,
+    task: "image_read",
   });
   return textOf(reply);
 }

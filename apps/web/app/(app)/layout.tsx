@@ -16,9 +16,11 @@ const NAV = [
   ["/inbox", "Inbox"],
   ["/assignments", "Assignments"],
   ["/drafts", "Drafts"],
+  ["/emails", "Emails"],
   ["/classes", "Classes"],
   ["/chat", "Chat"],
   ["/share", "Share"],
+  ["/costs", "Costs"],
   ["/status", "Status"],
   ["/settings", "Settings"],
 ] as const;

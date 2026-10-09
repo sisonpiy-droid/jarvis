@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { GeminiProvider, chat, jarvisTools, markdownToChatHtml, resetConversation } from "@jarvis/ai";
+import { GeminiProvider, googleCalendarFromEnv, meterTo, chat, jarvisTools, markdownToChatHtml, resetConversation } from "@jarvis/ai";
 import type { Sql } from "@jarvis/db";
 import { isSignedIn } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -12,13 +12,19 @@ export const maxDuration = 300; // multi-step answers to complex questions (deli
 const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 /** A document made in chat: stored like any file and served by the signed-in /files/<sha> route. */
-async function saveChatFile(sql: Sql, origin: string, bytes: Uint8Array, name: string): Promise<string> {
+async function saveChatFile(sql: Sql, origin: string, bytes: Uint8Array, name: string, mime = DOCX): Promise<string> {
   const sha = Buffer.from(await crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>)).toString("hex");
-  const path = `chat/${sha}.docx`;
-  await storage().upload(path, bytes, DOCX);
+  const path = `chat/${sha}${/\.[a-z0-9]{1,8}$/i.exec(name)?.[0].toLowerCase() ?? ""}`;
+  await storage().upload(path, bytes, mime);
   await sql`insert into jarvis.files (sha256, storage_path, mime_type, size_bytes, original_filename, text_status)
-    values (${sha}, ${path}, ${DOCX}, ${bytes.length}, ${name}, 'unsupported') on conflict (sha256) do nothing`;
+    values (${sha}, ${path}, ${mime}, ${bytes.length}, ${name}, 'unsupported') on conflict (sha256) do nothing`;
   return `Download link (put it in the reply as a Markdown link): ${origin}/files/${sha}`;
+}
+
+/** A stored file read back for clean_data (shared uploads, files from chat). */
+async function readStoredFile(sql: Sql, fileId: string): Promise<{ bytes: Uint8Array; name: string } | null> {
+  const [f] = await sql`select storage_path, original_filename from jarvis.files where sha256 = ${fileId}`;
+  return f ? { bytes: await storage().download(String(f.storage_path)), name: String(f.original_filename ?? "file") } : null;
 }
 
 const failed = (err: unknown) => NextResponse.json({ error: err instanceof Error ? err.message.slice(0, 200) : "Failed" }, { status: 500 });
@@ -48,9 +54,9 @@ export async function POST(req: NextRequest) {
     const res = await chat(
       {
         sql,
-        model: new GeminiProvider(key, process.env.GEMINI_MODEL ?? "gemini-3.6-flash"),
+        model: new GeminiProvider(key, process.env.GEMINI_MODEL ?? "gemini-3.6-flash", fetch, 60_000, meterTo(sql)),
         channel: "web",
-        tools: jarvisTools(sql, () => new Date(), { requestDraft, requestRevision: (id, text) => requestRevision(id, text, "chat"), sendFile: (bytes, name) => saveChatFile(sql, req.nextUrl.origin, bytes, name) }),
+        tools: jarvisTools(sql, () => new Date(), { requestDraft, requestRevision: (id, text) => requestRevision(id, text, "chat"), sendFile: (bytes, name, _caption, mime) => saveChatFile(sql, req.nextUrl.origin, bytes, name, mime), readFile: (id) => readStoredFile(sql, id), calendar: googleCalendarFromEnv(process.env) }),
       },
       message,
     );

@@ -8,9 +8,11 @@ const ITEMS = [
   ["/projects", "📁", "Projects"],
   ["/assignments", "📝", "Assignments"],
   ["/drafts", "✍️", "Drafts"],
+  ["/emails", "✉️", "Emails"],
   ["/classes", "🎓", "Classes"],
   ["/share", "📎", "Share"],
   ["/settings", "⚙️", "Settings"],
+  ["/costs", "💸", "AI costs"],
   ["/status", "📡", "Status"],
 ] as const;
 

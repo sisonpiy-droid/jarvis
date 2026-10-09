@@ -159,6 +159,18 @@ async function resolves(r: FactRef): Promise<boolean> {
 }
 
 describe("dailyBrief", () => {
+  it("Monday morning adds 'Before Friday' — overdue, then Monday to Friday by day; other days don't", async () => {
+    await seedBriefWorld(t.sql);
+    expect((await dailyBrief(t.sql, NOW, { model: null, stale: false })).weekAhead).toBeNull(); // a Thursday
+    const MON = new Date("2026-10-05T03:30:00.000Z"); // Mon 5 Oct, 09:00 IST
+    const { weekAhead } = await dailyBrief(t.sql, MON, { model: null, stale: false });
+    expect(weekAhead).toMatchObject({ dedupeKey: "week.ahead:2026-10-05", url: "/plan" });
+    expect(weekAhead!.text).toMatch(/Before Friday<\/b> · Mon.*5 Oct – Fri.*9 Oct/);
+    expect(weekAhead!.text).toContain("Prepare for Marketing mid-term");
+    expect(weekAhead!.text).toContain("Side project");
+    expect(db.notificationMeta(weekAhead!.dedupeKey)).toEqual({ category: "brief", url: "/plan" });
+  });
+
   it("traces every line to a row and stores exactly what it queues", async () => {
     await seedBriefWorld(t.sql);
     const { draft, stats } = await dailyBrief(t.sql, NOW, { model: null, stale: false });

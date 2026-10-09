@@ -1,4 +1,4 @@
-import { GeminiProvider } from "@jarvis/ai";
+import { GeminiProvider, meterTo } from "@jarvis/ai";
 import { draftAssignment, telegramSender } from "@jarvis/assist";
 import { connect } from "@jarvis/db";
 import { SupabaseStorage } from "@jarvis/files";
@@ -18,7 +18,7 @@ try {
   const deps = {
     sql,
     storage: new SupabaseStorage(need("SUPABASE_URL"), need("SUPABASE_SECRET_KEY")),
-    model: new GeminiProvider(need("GEMINI_API_KEY"), model, fetch, 180_000),
+    model: new GeminiProvider(need("GEMINI_API_KEY"), model, fetch, 180_000, meterTo(sql)),
     modelName: model,
     sendMessage: tg.sendMessage,
     sendDocument: tg.sendDocument,

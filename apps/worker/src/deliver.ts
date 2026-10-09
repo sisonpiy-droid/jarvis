@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { GeminiProvider, resolveAssignment } from "@jarvis/ai";
+import { GeminiProvider, meterTo, resolveAssignment } from "@jarvis/ai";
 import { connect } from "@jarvis/db";
 import { deliverAssignment } from "@jarvis/deliver";
 import { SupabaseStorage } from "@jarvis/files";
@@ -29,7 +29,7 @@ try {
     {
       sql,
       storage: new SupabaseStorage(need("SUPABASE_URL"), need("SUPABASE_SECRET_KEY")),
-      model: new GeminiProvider(need("GEMINI_API_KEY"), model, fetch, 240_000),
+      model: new GeminiProvider(need("GEMINI_API_KEY"), model, fetch, 240_000, meterTo(sql)),
       modelName: model,
       ...(local
         ? {

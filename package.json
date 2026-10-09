@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "mesa:login": "npm run -w @jarvis/worker mesa:login",
+    "google:auth": "npm run -w @jarvis/worker google:auth",
     "mesa:extract": "npm run -w @jarvis/worker mesa:extract",
     "test": "vitest run",
     "test:watch": "vitest",

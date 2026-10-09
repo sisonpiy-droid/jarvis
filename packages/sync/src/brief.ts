@@ -148,6 +148,34 @@ export function renderBrief(f: BriefFacts, s: BriefSections, note: { text: strin
   return { text: joined(lines), lines };
 }
 
+const fmtDay = (day: db.Day) => new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", weekday: "short", day: "numeric", month: "short" }).format(new Date(`${day}T12:00:00+05:30`));
+
+/**
+ * Monday morning: everything to do before the end of Friday, by day — what is already overdue, then deadlines
+ * Monday to Friday (assignments, tasks, exams, interviews), then what could go wrong. Null on any other day.
+ * Rendered from the same facts as the daily brief; nothing is invented.
+ */
+export function weekAheadDraft(f: BriefFacts, now: Date): NotificationDraft | null {
+  if (new Date(`${f.day}T12:00:00+05:30`).getUTCDay() !== 1) return null;
+  const friday = db.addDays(f.day, 4);
+  const items = db.upcomingFrom(f, now, db.dayStartIso(f.day), db.dayStartIso(db.addDays(friday, 1)));
+  const lines = [`📅 <b>Before Friday</b> · ${esc(fmtDay(f.day))} – ${esc(fmtDay(friday))}`];
+  if (f.overdue.length) lines.push("", "⚠️ <b>Already overdue</b>", ...f.overdue.slice(0, 5).map((t) => `• ${title(t.title)}`));
+  if (!items.length && !f.overdue.length) lines.push("", "Nothing is due before Friday. ✅");
+  let day = "";
+  for (const d of items) {
+    const k = db.istDay(d.at);
+    if (k !== day) lines.push("", `<b>${esc(fmtDay(k))}</b>`);
+    day = k;
+    lines.push(`• ${title(d.title)} — ${esc(d.when)}${d.context ? ` <i>(${esc(cut(d.context, 30))})</i>` : ""}`);
+  }
+  const risks = s_risks(f);
+  if (risks.length) lines.push("", "👀 <b>Watch out</b>", ...risks.map((r) => `• ${esc(cut(r.text, RISK_MAX))}`));
+  return { dedupeKey: `week.ahead:${f.day}`, priority: "normal", text: lines.join("\n"), scheduledFor: now.toISOString(), url: "/plan" };
+}
+
+const s_risks = (f: BriefFacts) => db.briefSections(f).risks.filter((r) => r.kind !== "stale" && r.kind !== "overdue").slice(0, 3); // overdue items are listed above
+
 /**
  * Today's brief: facts → focus note → lines → jarvis.briefs → the notification draft. The note is written once a
  * day: if this day's brief was already stored (say the run crashed before queueing it), its note is reused and
@@ -157,7 +185,7 @@ export async function dailyBrief(
   sql: Sql,
   now: Date,
   o: { model: ModelProvider | null; stale: boolean },
-): Promise<{ draft: NotificationDraft; stats: { focusNote: "ai" | "fallback"; detail: string | null; lines: number } }> {
+): Promise<{ draft: NotificationDraft; weekAhead: NotificationDraft | null; stats: { focusNote: "ai" | "fallback"; detail: string | null; lines: number } }> {
   const f = await db.loadBriefFacts(sql, now, { stale: o.stale });
   const s = db.briefSections(f);
   const existing = await db.getBrief(sql, f.day);
@@ -168,6 +196,7 @@ export async function dailyBrief(
   await db.saveBrief(sql, { day: f.day, lines, text, note: note.text || null, noteSource: note.source, noteDetail: note.detail, noteRefs: note.refs });
   return {
     draft: { dedupeKey: `brief:${f.day}`, priority: "normal", text, scheduledFor: now.toISOString(), url: "/" },
+    weekAhead: weekAheadDraft(f, now),
     stats: { focusNote: note.source, detail: note.detail, lines: lines.length },
   };
 }

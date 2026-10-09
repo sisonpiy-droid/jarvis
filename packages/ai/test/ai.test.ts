@@ -124,9 +124,10 @@ describe("create_reminder guards", () => {
     await expect(reminder.run({ text: "x", at: "tonight" })).rejects.toThrow(/ISO/);
     await expect(reminder.run({ text: "x", at: "2028-01-01T00:00:00Z" })).rejects.toThrow(/year/);
   });
-  it("is declared write-local (never an external action)", () => {
+  it("is declared write-local (never an external action; the calendar tool is the one named exception)", () => {
     expect(reminder.effect).toBe("write-local");
-    expect(jarvisTools(sql).every((t) => t.effect === "read" || t.effect === "write-local")).toBe(true);
+    // The one exception is adding an event to the owner's own calendar, only when they ask (calendar.test.ts).
+    expect(jarvisTools(sql).filter((t) => t.effect !== "read" && t.effect !== "write-local").map((t) => t.name)).toEqual(["add_calendar_event"]);
   });
 });
 
