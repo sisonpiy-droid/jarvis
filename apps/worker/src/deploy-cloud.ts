@@ -57,6 +57,8 @@ try {
   const optional = [
     "GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_DRAFT_MODEL", "AUTO_DRAFT", "BRIEF_AI", "GCAL_ICS_URL",
     // Notifications: push (VAPID, `npm run setup:push`) and email (Resend). The in-app inbox needs neither.
+    // Adding events to the owner's Google Calendar (`npm run google:auth`).
+    "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN",
     "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT", "RESEND_API_KEY", "NOTIFY_EMAIL_TO", "NOTIFY_EMAIL_FROM",
     // Legacy Telegram channel and bot (rollback until Phase 11).
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_WEBHOOK_SECRET",

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "mesa:login": "tsx src/mesa-login.ts",
+    "google:auth": "tsx src/google-auth.ts",
     "mesa:extract": "tsx src/mesa-extract.ts",
     "setup:db": "tsx src/setup-db.ts",
     "db:migrate": "tsx src/db-migrate.ts",

@@ -21,6 +21,7 @@ export async function draftWeekPlan(model: ModelProvider, s: Situation, now: Dat
     tools: [],
     json: true,
     temperature: 0.2,
+    task: "week_plan",
   });
   let raw: unknown;
   try {

@@ -9,7 +9,8 @@ export interface Tool {
   name: string;
   description: string;
   parameters: Record<string, unknown>;
-  effect: "read" | "write-local";
+  /** "write-calendar" adds events to the owner's own Google Calendar, only on their say-so; it is the only effect that leaves JARVIS. */
+  effect: "read" | "write-local" | "write-calendar";
   run(args: Record<string, unknown>): Promise<unknown>;
 }
 
@@ -32,6 +33,8 @@ export async function runAgent(opts: {
   tools: Tool[];
   maxSteps?: number;
   thinking?: GenerateRequest["thinking"];
+  /** Cost-log name for these calls (default "chat"). */
+  task?: string;
   toolChoice?: "auto" | "none";
 }): Promise<AgentResult> {
   const decls: ToolDecl[] = opts.tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }));
@@ -47,6 +50,7 @@ export async function runAgent(opts: {
       tools: decls,
       ...(opts.toolChoice ? { toolChoice: opts.toolChoice } : {}),
       ...(opts.thinking ? { thinking: opts.thinking } : {}),
+      task: opts.task ?? "chat",
     });
     turns.push(reply);
     const calls = toolCallsOf(reply);
@@ -81,7 +85,7 @@ export async function runAgent(opts: {
     turns.push({ role: "tool", parts: results });
   }
   // Out of steps: answer from what was gathered instead of giving up.
-  const last = await opts.model.generate({ system: opts.system, messages: [...opts.history, ...turns], tools: decls, toolChoice: "none", ...(opts.thinking ? { thinking: opts.thinking } : {}) }).catch(() => null);
+  const last = await opts.model.generate({ system: opts.system, messages: [...opts.history, ...turns], tools: decls, toolChoice: "none", task: opts.task ?? "chat", ...(opts.thinking ? { thinking: opts.thinking } : {}) }).catch(() => null);
   const text = last && !toolCallsOf(last).length ? textOf(last) : "";
   if (last && text) {
     turns.push(last);

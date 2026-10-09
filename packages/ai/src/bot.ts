@@ -4,6 +4,8 @@ import { chat } from "./jarvis";
 import { markdownToTelegramHtml, splitForTelegram } from "./telegram-format";
 import { forgetMemory, listMemories, memoryScopeLabel } from "./memory";
 import { jarvisTools, resolveAssignment } from "./tools";
+import type { GoogleCalendar } from "./google-calendar";
+import { costSummary, fmtTokens, fmtUsd, type CostWindow } from "@jarvis/db";
 
 // Telegram front door. Only the owner's chat is served; every other sender is
 // ignored. Slash commands answer straight from the database (no AI needed);
@@ -11,7 +13,14 @@ import { jarvisTools, resolveAssignment } from "./tools";
 
 export interface TelegramUpdate {
   update_id: number;
-  message?: { message_id: number; chat: { id: number | string }; text?: string };
+  message?: {
+    message_id: number;
+    chat: { id: number | string };
+    text?: string;
+    /** Text sent with a file. */
+    caption?: string;
+    document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
+  };
 }
 
 export interface BotDeps {
@@ -25,6 +34,12 @@ export interface BotDeps {
   requestDraft?: (assignmentId: string) => Promise<void>;
   /** Saves an instruction for an assignment and redoes it. */
   requestRevision?: (assignmentId: string, instruction: string) => Promise<void>;
+  /** Stores a file the owner sent so chat can read it (set by the Edge function, which has storage). */
+  ingestDocument?: (bytes: Uint8Array, name: string, mime: string | null) => Promise<{ fileId: string; name: string; textStatus: string }>;
+  /** Reads a stored file back, for clean_data. */
+  readFile?: (fileId: string) => Promise<{ bytes: Uint8Array; name: string } | null>;
+  /** The owner's Google Calendar, once connected. */
+  calendar?: GoogleCalendar | null;
   fetch?: typeof fetch;
   now?: () => Date;
 }
@@ -40,6 +55,7 @@ export const HELP = [
   "/today — today's classes",
   "/tomorrow — tomorrow's classes",
   "/status — sync health and sign-in expiry",
+  "/costs — what the AI calls cost: today, this week, by task",
   "/sync — check the LMS right now",
   "/draft &lt;assignment&gt; — do the assignment (doc + workbook/slides)",
   "/revise &lt;assignment&gt; | &lt;what to change&gt; — edit it",
@@ -64,6 +80,18 @@ async function telegram(deps: BotDeps, method: string, body: Record<string, unkn
   if (!json.ok) throw new Error(`Telegram ${method} failed: ${json.description ?? res.status}`);
 }
 
+/** A file the owner sent the bot (Telegram allows bots 20 MB). The token stays out of every error message. */
+export const TELEGRAM_DOWNLOAD_MAX = 20 * 2 ** 20;
+async function downloadFile(deps: BotDeps, fileId: string): Promise<Uint8Array> {
+  const f = deps.fetch ?? fetch;
+  const info = await f(`https://api.telegram.org/bot${deps.token}/getFile`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ file_id: fileId }) });
+  const j = (await info.json().catch(() => ({}))) as { ok?: boolean; result?: { file_path?: string }; description?: string };
+  if (!j.ok || !j.result?.file_path) throw new Error(`Telegram getFile failed: ${j.description ?? info.status}`);
+  const res = await f(`https://api.telegram.org/file/bot${deps.token}/${j.result.file_path}`);
+  if (!res.ok) throw new Error(`Telegram file download failed: HTTP ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 export async function reply(deps: BotDeps, html: string) {
   for (const chunk of splitForTelegram(html)) {
     try {
@@ -73,6 +101,24 @@ export async function reply(deps: BotDeps, html: string) {
       await telegram(deps, "sendMessage", { chat_id: deps.ownerChatId, text: chunk.replace(/<[^>]+>/g, "") });
     }
   }
+}
+
+const costLine = (t: { task: string; usd: number; calls: number; inputTokens: number; outputTokens: number }) => `• ${esc(t.task)} — ${fmtUsd(t.usd)} · ${t.calls} call${t.calls === 1 ? "" : "s"} · ${fmtTokens(t.inputTokens + t.outputTokens)} tokens`;
+const costWindow = (label: string, w: CostWindow) => [`<b>${label}</b>: ${fmtUsd(w.usd)} · ${fmtTokens(w.tokens)} tokens · ${w.calls} calls`, ...w.byTask.slice(0, 6).map(costLine)];
+
+/** /costs: spend today and this week by task, and the most expensive task. Estimated at paid prices (the free tier costs nothing). */
+export async function costsReply(sql: Sql, now: Date): Promise<string> {
+  const s = await costSummary(sql, now);
+  if (!s.all.calls) return "💸 No AI calls logged yet.";
+  const top = s.topTask!;
+  return [
+    "💸 <b>AI costs</b> <i>(estimated at paid Gemini Flash prices — you're on the free tier)</i>",
+    ...costWindow("Today", s.today),
+    "",
+    ...costWindow("Last 7 days", s.week),
+    "",
+    `🏆 Most expensive task: <b>${esc(top.task)}</b> — ${fmtUsd(top.usd)} of ${fmtUsd(s.all.usd)} so far (${Math.round((top.usd / (s.all.usd || 1)) * 100)}%)`,
+  ].join("\n");
 }
 
 export async function commandReply(deps: BotDeps, cmd: string, arg = ""): Promise<string | null> {
@@ -108,6 +154,8 @@ export async function commandReply(deps: BotDeps, cmd: string, arg = ""): Promis
       await deps.requestDraft(String(r.one.sourceId));
       return `✍️ Drafting <b>${esc(r.one.title)}</b> — reading the brief, attachments and class slides. The Word doc arrives here in 1–3 minutes.`;
     }
+    case "/costs":
+      return costsReply(deps.sql, deps.now?.() ?? new Date());
     case "/start":
     case "/help":
       return HELP;
@@ -154,17 +202,34 @@ export async function commandReply(deps: BotDeps, cmd: string, arg = ""): Promis
 /** Handles one Telegram update. Exactly-once: the update id is recorded before any work. */
 export async function handleUpdate(deps: BotDeps, update: TelegramUpdate): Promise<void> {
   const msg = update.message;
-  if (!msg?.text || String(msg.chat.id) !== deps.ownerChatId) return; // not the owner: ignore silently
+  if (!msg || (!msg.text && !msg.document) || String(msg.chat.id) !== deps.ownerChatId) return; // not the owner: ignore silently
   const fresh = await deps.sql`insert into jarvis.telegram_updates (update_id) values (${update.update_id}) on conflict do nothing returning update_id`;
   if (!fresh.length) return; // Telegram retry of something already handled
 
-  const text = msg.text.trim();
-  const cmd = text.startsWith("/") ? text.split(/[\s@]/)[0]!.toLowerCase() : null;
+  let text = (msg.text ?? msg.caption ?? "").trim();
+  const cmd = !msg.document && text.startsWith("/") ? text.split(/[\s@]/)[0]!.toLowerCase() : null;
   try {
     if (cmd) {
       const out = await commandReply(deps, cmd, text.slice(text.split(/\s/)[0]!.length).trim());
       await reply(deps, out ?? `Unknown command. ${HELP}`);
       return;
+    }
+    if (msg.document) {
+      const d = msg.document;
+      const name = d.file_name ?? "file";
+      if (!deps.ingestDocument) {
+        await reply(deps, "📎 I can't take files here yet.");
+        return;
+      }
+      if ((d.file_size ?? 0) > TELEGRAM_DOWNLOAD_MAX) {
+        await reply(deps, `📎 ${esc(name)} is over 20 MB — Telegram won't let me download it. Send a smaller file.`);
+        return;
+      }
+      await telegram(deps, "sendChatAction", { chat_id: deps.ownerChatId, action: "typing" }).catch(() => {});
+      const f = await deps.ingestDocument(await downloadFile(deps, d.file_id), name, d.mime_type ?? null);
+      // The same line the web app's share sheet writes, so chat treats it as a shared file.
+      text = `📎 Shared file: ${f.name} (file_id: ${f.fileId})${f.textStatus === "done" ? "" : " — no readable text"}
+${text || "(no instruction — ask what to do with it)"}`;
     }
     if (!deps.model) {
       await reply(deps, "💬 Chat isn't switched on yet (no AI key). Quick commands work: /due /today /status /sync");
@@ -175,15 +240,17 @@ export async function handleUpdate(deps: BotDeps, update: TelegramUpdate): Promi
       { sql: deps.sql, model: deps.model, channel: "telegram", ...(deps.now ? { now: deps.now } : {}), tools: jarvisTools(deps.sql, deps.now, {
           ...(deps.requestDraft ? { requestDraft: deps.requestDraft } : {}),
           ...(deps.requestRevision ? { requestRevision: deps.requestRevision } : {}),
-          sendFile: async (bytes, filename, caption) => {
+          ...(deps.readFile ? { readFile: deps.readFile } : {}),
+          ...(deps.calendar ? { calendar: deps.calendar } : {}),
+          sendFile: async (bytes, filename, caption, mime = DOCX) => {
             const form = new FormData();
             form.append("chat_id", deps.ownerChatId);
             form.append("caption", caption.slice(0, 1024));
-            form.append("document", new Blob([bytes as Uint8Array<ArrayBuffer>], { type: DOCX }), filename);
+            form.append("document", new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mime }), filename);
             const res = await (deps.fetch ?? fetch)(`https://api.telegram.org/bot${deps.token}/sendDocument`, { method: "POST", body: form });
             const json = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string };
             if (!json.ok) throw new Error(`Telegram sendDocument failed: ${json.description ?? res.status}`);
-            return "Sent in this chat as a Word file.";
+            return "Sent in this chat as a file.";
           },
         }),
       },

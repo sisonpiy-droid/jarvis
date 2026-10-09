@@ -267,7 +267,7 @@ export async function focusNote(
     let raw: string;
     try {
       const reply = await withTimeout(
-        model.generate({ system: FOCUS_NOTE_SYSTEM, messages: [userText(JSON.stringify({ FACTS: modelFacts(tokens) }))], tools: [], toolChoice: "none", json: true, temperature: 0.2 }),
+        model.generate({ system: FOCUS_NOTE_SYSTEM, messages: [userText(JSON.stringify({ FACTS: modelFacts(tokens) }))], tools: [], toolChoice: "none", json: true, temperature: 0.2, task: "brief_note" }),
         o.timeoutMs ?? NOTE_TIMEOUT_MS,
       );
       raw = textOf(reply);

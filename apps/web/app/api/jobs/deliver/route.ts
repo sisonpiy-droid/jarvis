@@ -1,5 +1,5 @@
 import { after, NextResponse, type NextRequest } from "next/server";
-import { GeminiProvider } from "@jarvis/ai";
+import { GeminiProvider, meterTo } from "@jarvis/ai";
 import { telegramSender } from "@jarvis/assist";
 import type { Sql } from "@jarvis/db";
 import { deliverAssignment } from "@jarvis/deliver";
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
       {
         sql,
         storage: storage(),
-        model: new GeminiProvider(key, model, fetch, 200_000),
+        model: new GeminiProvider(key, model, fetch, 200_000, meterTo(sql)),
         modelName: model,
         ...(mirror ? { sendFile: telegramSender(token, chat).sendFile } : {}),
       },

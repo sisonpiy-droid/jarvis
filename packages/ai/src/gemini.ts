@@ -1,3 +1,4 @@
+import { logLlmCall, type Sql } from "@jarvis/db";
 import { SYNTHETIC_ID_PREFIX, isSyntheticCallId, type GenerateRequest, type Message, type ModelProvider, type Part, type ProviderMeta } from "./model";
 
 // Gemini over REST (generateContent) with function calling. The key goes in a
@@ -5,6 +6,9 @@ import { SYNTHETIC_ID_PREFIX, isSyntheticCallId, type GenerateRequest, type Mess
 // this file maps them to Gemini's wire format and back. Thought signatures stay
 // on exactly the part that carried them (signature-only parts are kept too),
 // because Gemini 3 rejects a multi-step tool exchange that drops one.
+
+/** Receives one record per successful call (see @jarvis/db llm-usage). A failure inside it never fails the call. */
+export type UsageMeter = (u: { task: string; model: string; inputTokens: number; outputTokens: number }) => void | Promise<void>;
 
 export interface GeminiPart {
   text?: string;
@@ -90,6 +94,7 @@ export class GeminiProvider implements ModelProvider {
     private readonly model = "gemini-3.6-flash",
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly timeoutMs = 60_000,
+    private readonly meter: UsageMeter | null = null,
   ) {}
 
   /** Seed for the ids of id-less calls in a live reply: a per-instance counter plus 6 random base36 characters. */
@@ -131,11 +136,21 @@ export class GeminiProvider implements ModelProvider {
     const data = (await res.json().catch(() => ({}))) as {
       error?: { message?: string };
       candidates?: Array<{ content?: GeminiContent; finishReason?: string }>;
+      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
     };
     if (!res.ok) throw new Error(`Gemini HTTP ${res.status}: ${(data.error?.message ?? "no detail").slice(0, 200)}`);
     const cand = data.candidates?.[0];
     const parts = cand?.content?.parts ?? [];
     if (!parts.length) throw new Error(`Gemini returned nothing (finishReason: ${cand?.finishReason ?? "unknown"})`);
+    const u = data.usageMetadata;
+    // Thinking tokens are billed as output.
+    if (this.meter && u) await Promise.resolve(this.meter({ task: req.task ?? "other", model: this.model, inputTokens: u.promptTokenCount ?? 0, outputTokens: (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0) })).catch(() => {});
     return fromGeminiContent({ role: "model", parts }, this.liveSeed());
   }
 }
+
+/** A meter that writes to the cost log. */
+export const meterTo =
+  (sql: Sql): UsageMeter =>
+  (u) =>
+    logLlmCall(sql, u);

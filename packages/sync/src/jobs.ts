@@ -157,8 +157,8 @@ export const jobBodies: Record<JobName, (deps: SyncDeps, opts: SyncOptions, now:
     const integ = await db.getIntegration(deps.sql, "mesa");
     const fresh = !!integ?.lastSuccessAt && now.getTime() - Date.parse(integ.lastSuccessAt) <= BRIEF_FRESHNESS_MS;
     if (!fresh && h < BRIEF_STALE_HOUR) return { status: "idle", stats: { waitingForFreshLmsData: true } };
-    const { draft, stats } = await dailyBrief(deps.sql, now, { model: deps.model ?? null, stale: !fresh });
-    const queued = await db.enqueueNotifications(deps.sql, [draft]);
+    const { draft, weekAhead, stats } = await dailyBrief(deps.sql, now, { model: deps.model ?? null, stale: !fresh });
+    const queued = await db.enqueueNotifications(deps.sql, weekAhead ? [draft, weekAhead] : [draft]);
     return queued ? { status: "success", stats: { queued, ...stats, lmsStale: !fresh } } : { status: "idle" };
   },
 

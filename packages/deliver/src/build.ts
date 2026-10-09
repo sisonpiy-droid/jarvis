@@ -173,13 +173,14 @@ Plain-text formulas only (no LaTeX). Reply with the Markdown only.`;
 
 /** Asks for JSON and retries once with the parser's complaint if the reply is malformed. */
 async function generateJson<T>(deps: DeliverDeps, schema: z.ZodType<T>, what: string, req: GenerateRequest): Promise<T> {
-  const first = await deps.model.generate(req);
+  const first = await deps.model.generate({ task: "deliverable", ...req });
   try {
     return parseJson(schema, textOf(first), what);
   } catch (err) {
     deps.log?.warn(`${what}: retrying after invalid JSON`, { error: err });
     const retry = await deps.model.generate({
       ...req,
+      task: "deliverable",
       messages: [
         ...req.messages,
         { role: "assistant", parts: [{ type: "text", text: textOf(first).slice(0, 20_000) }] },
@@ -480,6 +481,7 @@ export async function deliverAssignment(deps: DeliverDeps, assignmentId: string,
         messages: [{ role: "user", parts: [{ type: "text", text: context }, ...g.fileParts, { type: "text", text: "\nWrite the submission now." }] }],
         tools: [],
         temperature: 0.4,
+        task: "deliverable",
       }),
     ]);
     const docText = textOf(docReply).replace(/^```(?:markdown|md)?\s*/i, "").replace(/```\s*$/, "");

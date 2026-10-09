@@ -39,6 +39,8 @@ export interface GenerateRequest {
   toolChoice?: "auto" | "none";
   /** How much the model reasons before answering; less is faster. Provider default when omitted. */
   thinking?: "minimal" | "low" | "medium" | "high";
+  /** What the call is for ("chat", "brief_note", …) — the cost log is grouped by it. */
+  task?: string;
 }
 
 export interface ModelProvider {

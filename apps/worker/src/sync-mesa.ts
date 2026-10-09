@@ -1,4 +1,4 @@
-import { GeminiProvider } from "@jarvis/ai";
+import { GeminiProvider, meterTo } from "@jarvis/ai";
 import { connect, getIntegration } from "@jarvis/db";
 import { fileSessionStore } from "@jarvis/mesa/file-session";
 import { SupabaseStorage } from "@jarvis/files";
@@ -39,7 +39,7 @@ try {
       log,
       icsUrl: process.env.GCAL_ICS_URL ?? null,
       // The brief's focus note; without a key (or with BRIEF_AI=off) the brief uses the fixed-template note.
-      model: gemini && process.env.BRIEF_AI !== "off" ? new GeminiProvider(gemini, process.env.GEMINI_MODEL || "gemini-3.6-flash", fetch, 20_000) : null,
+      model: gemini && process.env.BRIEF_AI !== "off" ? new GeminiProvider(gemini, process.env.GEMINI_MODEL || "gemini-3.6-flash", fetch, 45_000, meterTo(sql)) : null,
       maxConcurrency: intEnv("MESA_MAX_CONCURRENCY", 3),
       minGapMs: intEnv("MESA_MIN_GAP_MS", 150),
     },
