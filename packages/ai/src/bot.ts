@@ -5,7 +5,8 @@ import { markdownToTelegramHtml, splitForTelegram } from "./telegram-format";
 import { forgetMemory, listMemories, memoryScopeLabel } from "./memory";
 import { jarvisTools, resolveAssignment } from "./tools";
 import type { GoogleCalendar } from "./google-calendar";
-import { costSummary, fmtTokens, fmtUsd, type CostWindow } from "@jarvis/db";
+import { costSummary, fmtTokens, fmtUsd, listBooks, onlyActiveBook, postponeBook, type CostWindow } from "@jarvis/db";
+import { deliverPiece } from "./reading";
 
 // Telegram front door. Only the owner's chat is served; every other sender is
 // ignored. Slash commands answer straight from the database (no AI needed);
@@ -56,6 +57,7 @@ export const HELP = [
   "/tomorrow — tomorrow's classes",
   "/status — sync health and sign-in expiry",
   "/costs — what the AI calls cost: today, this week, by task",
+  "/read — the next piece of your book now · /postpone — move it a day",
   "/sync — check the LMS right now",
   "/draft &lt;assignment&gt; — do the assignment (doc + workbook/slides)",
   "/revise &lt;assignment&gt; | &lt;what to change&gt; — edit it",
@@ -153,6 +155,20 @@ export async function commandReply(deps: BotDeps, cmd: string, arg = ""): Promis
       if ("candidates" in r) return ["Several match — be more specific:", ...r.candidates.map((c) => `• ${esc(c.title)} — ${esc(c.due)} (${esc(c.status)})`)].join("\n");
       await deps.requestDraft(String(r.one.sourceId));
       return `✍️ Drafting <b>${esc(r.one.title)}</b> — reading the brief, attachments and class slides. The Word doc arrives here in 1–3 minutes.`;
+    }
+    case "/read":
+    case "/postpone": {
+      const active = await listBooks(deps.sql, "active");
+      if (!active.length) return "📖 No book is being read. Tell me a book title (public domain) or send the PDF.";
+      const book = await onlyActiveBook(deps.sql);
+      if (!book) return `📖 You're reading ${active.length} books — tell me which one in chat (e.g. “next piece of ${esc(active[0]!.title)}”).`;
+      if (cmd === "/postpone") {
+        const days = Math.max(1, Math.min(30, Math.round(Number(arg) || 1)));
+        const b = (await postponeBook(deps.sql, book.id, days))!;
+        return `⏭️ <b>${esc(b.title)}</b>: piece ${b.nextPiece} of ${b.totalPieces} moved to ${esc(b.nextDay)}.`;
+      }
+      const d = await deliverPiece(deps.sql, deps.model, book.id, deps.now?.() ?? new Date());
+      return d ? `📖 Piece ${d.n} of ${d.total} of <b>${esc(d.title)}</b> is on its way (a minute or so).` : "That book has nothing left to send.";
     }
     case "/costs":
       return costsReply(deps.sql, deps.now?.() ?? new Date());

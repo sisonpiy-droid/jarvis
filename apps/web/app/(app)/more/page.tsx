@@ -9,6 +9,7 @@ const ITEMS = [
   ["/assignments", "📝", "Assignments"],
   ["/drafts", "✍️", "Drafts"],
   ["/emails", "✉️", "Emails"],
+  ["/reading", "📚", "Reading"],
   ["/classes", "🎓", "Classes"],
   ["/share", "📎", "Share"],
   ["/settings", "⚙️", "Settings"],

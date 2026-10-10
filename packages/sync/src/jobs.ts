@@ -3,6 +3,7 @@ import type { JobStatus, JobTrigger, NotificationDraft, Sql } from "@jarvis/db";
 import { runNotificationService } from "@jarvis/notify";
 import type { Logger } from "@jarvis/shared";
 import { dailyBrief } from "./brief";
+import { runReading } from "@jarvis/ai";
 import { runClassPrep } from "./class-prep";
 import { runEngine } from "./engine";
 import { runEvening } from "./evening";
@@ -25,11 +26,11 @@ async function storedFile(deps: SyncDeps, sha: string) {
   return { bytes: await deps.storage.download(String(f.storage_path)), name: String(f.original_filename || `${sha.slice(0, 12)}.bin`), mime: String(f.mime_type || "application/octet-stream") };
 }
 
-export const JOB_NAMES = ["mesa", "calendar", "notify", "briefs", "drafts", "habits", "engine", "prep", "evening", "health"] as const;
+export const JOB_NAMES = ["mesa", "calendar", "notify", "briefs", "drafts", "habits", "engine", "prep", "evening", "reading", "health"] as const;
 export type JobName = (typeof JOB_NAMES)[number];
 export const isJobName = (s: string): s is JobName => (JOB_NAMES as readonly string[]).includes(s);
 
-/** pg_cron schedules; must match the cadences seeded in migrations 0012, 0016, 0017, 0020 and 0021. */
+/** pg_cron schedules; must match the cadences seeded in migrations 0012, 0016, 0017, 0020, 0021 and 0026. */
 export const JOB_SCHEDULES: Record<JobName, string> = {
   mesa: "*/5 * * * *",
   calendar: "*/5 * * * *", // 5 min: the 30-minute heads-up window needs it
@@ -40,6 +41,7 @@ export const JOB_SCHEDULES: Record<JobName, string> = {
   engine: "*/5 * * * *",
   prep: "*/5 * * * *",
   evening: "*/15 * * * *",
+  reading: "*/15 * * * *", // from 08:30 IST; a late run still delivers the same morning
   health: "*/15 * * * *",
 };
 
@@ -54,6 +56,7 @@ const LEASE_MS: Record<JobName, number> = {
   engine: 2 * 60_000,
   prep: 2 * 60_000,
   evening: 3 * 60_000,
+  reading: 3 * 60_000, // up to a few summary calls
   health: 2 * 60_000,
 };
 
@@ -196,6 +199,11 @@ export const jobBodies: Record<JobName, (deps: SyncDeps, opts: SyncOptions, now:
     const s = await runEvening(deps.sql, now, deps.model ?? null, deps.log);
     if (!s.checkin && !s.learned && s.planned == null) return { status: "idle" };
     return { status: s.errors.length ? "partial" : "success", stats: { ...s }, ...(s.errors.length ? { error: s.errors.join("; ") } : {}) };
+  },
+
+  async reading(deps, _opts, now) {
+    const sent = await runReading(deps.sql, deps.model ?? null, now);
+    return sent.length ? { status: "success", stats: { sent: sent.map((d) => `${d.title} ${d.n}/${d.total}`) } } : { status: "idle" };
   },
 
   async health(deps) {
