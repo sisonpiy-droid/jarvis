@@ -5,6 +5,7 @@ import { loadHistory, saveTurns } from "./history";
 import { textOf, type Message, type ModelProvider } from "./model";
 import { detectMemoryFocus, loadMemories, memoryBlock, memoryTools, type Memory } from "./memory";
 import { jarvisTools } from "./tools";
+import { bookTools } from "./book-tools";
 import { weekPlanTool } from "./week-plan";
 
 // The chat brain, the same for every surface (web chat, the legacy Telegram bot): a channel-neutral prompt,
@@ -51,6 +52,7 @@ How to work:
 - "Remind me at …": create_reminder with an exact ISO time in +05:30 (it arrives in the inbox and as a push). Confirm the time you set.
 - A shared spreadsheet/CSV + "clean", "tidy" or "fix" → clean_data; report the counts and list EVERY flagged row (row, why); never guess a flagged value.
 - "Block time" / "add a session to my calendar": add_calendar_event (straight onto their Google Calendar). Only on request; on a clash say what it overlaps and ask first.
+- Books: "read <book> with me" or a shared book PDF → start_book (one ~page a day, with a summary of the days before). "Next" → next_reading; "postpone" → postpone_reading. Only public-domain books can be fetched by title; otherwise ask for the PDF — never write book text yourself.
 - Emails: when the owner must send one, call draft_email, show the whole draft (To, Subject, body) and ask what to change (revise_email_draft). You can only DRAFT — you cannot send, reply to or forward email and never say you did; they send it themselves. When they say they sent it, close_email_draft.
 - The LMS is read-only: you cannot submit, email or change anything there. If asked, say so and suggest what the owner can do.
 - Memory is durable context about the owner (e.g. 'prefers consulting roles'). Anything with a date, number, progress or status is DATABASE STATE ('Spinny deck is due Friday') — store it with create_task / create_goal / create_project, never save_memory. Save memories with the right scope: project notes with the project, MESA context as mesa, notes about a person as person + name. Use search_memory when the owner refers to something told before that isn't listed. Old notes are not tracked goals; offer to convert one only if relevant, at most once, and only after a clear yes call create_goal/create_project then resolve_old_memory. Never save passwords, OTPs or other secrets.
@@ -128,7 +130,7 @@ export async function chat(deps: ChatDeps, userText: string): Promise<ChatResult
   const userTexts = history.filter((m) => m.role === "user").map((m) => textOf(m)).filter(Boolean);
   const [memories, situation, alerts] = await Promise.all([detectMemoryFocus(sql, [userText, ...userTexts.slice(-2).reverse()]).then((f) => loadMemories(sql, f)), situationP, alertsP]);
   const system = systemPrompt(at, memories, situation) + (alerts ? `\n\n${alerts}` : "");
-  const tools = [...(deps.tools ?? jarvisTools(sql, now)), ...memoryTools(sql, now), weekPlanTool(sql, deps.model, now)];
+  const tools = [...(deps.tools ?? jarvisTools(sql, now)), ...memoryTools(sql, now), weekPlanTool(sql, deps.model, now), ...bookTools(sql, deps.model, now)];
   const message = userText.slice(0, 4000);
 
   const first = await runAgent({ model: deps.model, system, history, user: [{ type: "text", text: message }], tools, maxSteps: MAX_CHAT_STEPS, thinking: CHAT_THINKING });

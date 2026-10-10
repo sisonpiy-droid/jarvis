@@ -19,3 +19,4 @@ export * from "./checkin";
 export * from "./week-plan";
 export * from "./llm-usage";
 export * from "./email-drafts";
+export * from "./books";
