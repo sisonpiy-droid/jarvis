@@ -41,7 +41,7 @@ export const JOB_SCHEDULES: Record<JobName, string> = {
   engine: "*/5 * * * *",
   prep: "*/5 * * * *",
   evening: "*/15 * * * *",
-  reading: "*/15 * * * *", // from 07:00 IST; a late run still delivers the same morning
+  reading: "*/15 * * * *", // from 08:30 IST; a late run still delivers the same morning
   health: "*/15 * * * *",
 };
 

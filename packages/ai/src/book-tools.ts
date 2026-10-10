@@ -53,7 +53,7 @@ export function bookTools(sql: Sql, model: ModelProvider | null, now: () => Date
         }
         try {
           const book = await db.createBook(sql, { title, author, source, fileSha: fileId || null, text }, now());
-          return { started: true, book: show(book), note: "The first piece (the beginning) arrives this morning from 7 am, or right away with next_reading. About 45 days in all. Tell the owner which book and edition you found so they can say if it's the wrong one." };
+          return { started: true, book: show(book), note: "The first piece (the beginning) arrives this morning from 8:30 am, or right away with next_reading. About 45 days in all. Tell the owner which book and edition you found so they can say if it's the wrong one." };
         } catch (err) {
           return { started: false, reason: err instanceof Error ? err.message : "couldn't split that text" };
         }

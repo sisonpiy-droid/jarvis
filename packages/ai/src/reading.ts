@@ -33,7 +33,7 @@ export async function updateBookSummary(model: ModelProvider, title: string, pri
 }
 
 /** The message for piece n: the story so far (from day two), then the reading. HTML for Telegram; the inbox shows it as text. */
-export function readingMessage(book: Pick<Book, "title" | "totalPieces">, piece: { n: number; label: string | null; body: string }, summary: string): string {
+export function readingMessage(book: Pick<Book, "title" | "totalPieces">, piece: { n: number; label: string | null; body: string }, summary: string, whole = ""): string {
   const head = `📖 <b>${esc(book.title)}</b> · day ${piece.n} of ${book.totalPieces}${piece.label ? ` · ${esc(piece.label)}` : ""}`;
   const last = piece.n >= book.totalPieces;
   return [
@@ -42,6 +42,8 @@ export function readingMessage(book: Pick<Book, "title" | "totalPieces">, piece:
     "",
     `<b>${piece.n === 1 ? "Today's reading — the beginning" : "Today's reading"}</b>`,
     esc(piece.body),
+    // The last day also gets the whole book in brief, now including this final piece.
+    ...(last && whole ? ["", "<b>The whole book in brief</b>", esc(whole)] : []),
     "",
     last ? "🎉 <i>That was the last piece — you've finished the book.</i>" : "<i>/read for the next piece now · /postpone to move it a day</i>",
   ].join("\n");
@@ -78,15 +80,26 @@ export async function deliverPiece(sql: Sql, model: ModelProvider | null, bookId
     await db.saveBookSummary(sql, book.id, summary, summaryUpto);
   }
 
-  await db.enqueueNotifications(sql, [{ dedupeKey: `reading:${book.id}:${n}`, priority: "normal", text: readingMessage(book, piece, summary), scheduledFor: now.toISOString(), url: "/reading" }]);
+  // Final piece: one more summary step so the last day closes with a summary of the whole book.
+  let whole = "";
+  if (model && n >= book.totalPieces && summaryUpto >= n - 1) {
+    try {
+      whole = await updateBookSummary(model, book.title, summary, piece.body);
+      if (whole !== summary) await db.saveBookSummary(sql, book.id, whole, n);
+    } catch {
+      whole = "";
+    }
+  }
+
+  await db.enqueueNotifications(sql, [{ dedupeKey: `reading:${book.id}:${n}`, priority: "normal", text: readingMessage(book, piece, summary, whole), scheduledFor: now.toISOString(), url: "/reading" }]);
   await db.markPieceSent(sql, book, n, now);
   return { bookId: book.id, title: book.title, n, total: book.totalPieces, finished: n >= book.totalPieces };
 }
 
-/** The morning run: every active book whose piece is due gets it (from 07:00 IST). */
+/** The morning run: every active book whose piece is due gets it (from 08:30 IST). */
 export async function runReading(sql: Sql, model: ModelProvider | null, now: Date): Promise<Delivered[]> {
-  const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", hour12: false }).format(now));
-  if (hour < READING_HOUR) return [];
+  const [h = 0, m = 0] = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).format(now).split(":").map(Number);
+  if (h * 60 + m < READING_AT.hour * 60 + READING_AT.minute) return [];
   const out: Delivered[] = [];
   for (const b of await db.booksDue(sql, now)) {
     const d = await deliverPiece(sql, model, b.id, now);
@@ -95,5 +108,5 @@ export async function runReading(sql: Sql, model: ModelProvider | null, now: Dat
   return out;
 }
 
-/** Pieces go out from this hour (IST). */
-export const READING_HOUR = 7;
+/** Pieces go out from this time (IST); the job runs every 15 minutes, so a piece lands at 08:30 or just after. */
+export const READING_AT = { hour: 8, minute: 30 };

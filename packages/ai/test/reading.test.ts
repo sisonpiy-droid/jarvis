@@ -12,7 +12,7 @@ import { say, scripted } from "./scripted";
 // summary of all the days before; ask for the next one early or postpone; a 100-page book takes about 40–50 days."
 
 const MON_6AM = new Date("2026-10-12T00:30:00.000Z"); // 06:00 IST — before reading time
-const day = (n: number, hh = "02:00") => new Date(`2026-10-${String(12 + n).padStart(2, "0")}T${hh}:00.000Z`); // 07:30 IST on day n (0 = Mon 12 Oct)
+const day = (n: number, hh = "03:00") => new Date(`2026-10-${String(12 + n).padStart(2, "0")}T${hh}:00.000Z`); // 08:30 IST on day n (0 = Mon 12 Oct)
 
 const para = (i: number) => `${Array.from({ length: 50 }, (_, k) => `w${i}x${k}`).join(" ")}.`;
 /** A 100-page book: 400 words a page, "[page N]" markers like extracted PDF text. */
@@ -53,9 +53,10 @@ describe("splitting", () => {
 });
 
 describe("the daily reading", () => {
-  it("day one: the beginning only, from 7 am, once a day; day two: the next piece with a summary of the days before", async () => {
+  it("day one: the beginning only, from 8:30 am, once a day; day two: the next piece with a summary of the days before", async () => {
     const book = await db.createBook(t.sql, { title: "Pride and Prejudice", author: "Jane Austen", source: "public_domain", text: BOOK }, day(0));
-    expect(await runReading(t.sql, null, MON_6AM)).toEqual([]); // before 7:00 IST
+    expect(await runReading(t.sql, null, MON_6AM)).toEqual([]); // before 8:30 IST
+    expect(await runReading(t.sql, null, day(0, "02:59"))).toEqual([]); // 08:29 IST: still too early
     const { model } = scripted(SUMMARY("Mr Bennet's family hears that a rich bachelor is moving nearby."));
 
     const d1 = await runReading(t.sql, model, day(0));
@@ -119,6 +120,20 @@ describe("the daily reading", () => {
     expect(String((await sent())[0]!.text)).toContain("you've finished the book");
     expect(await db.getBook(t.sql, book.id)).toMatchObject({ status: "done" });
     expect(await deliverPiece(t.sql, null, book.id, day(6))).toBeNull();
+  });
+
+  it("the last day: the final piece, the story so far, and a summary of the whole book including that piece", async () => {
+    const book = await db.createBook(t.sql, { title: "B", source: "pdf", text: BOOK }, day(0));
+    await t.sql`update jarvis.books set next_piece = ${book.totalPieces}, summary = 'Everything up to the last chapter, in brief.', summary_upto = ${book.totalPieces - 1} where id = ${book.id}`;
+    const { model, requests } = scripted(SUMMARY("The whole book: the journey from the first page to the ending, complete."));
+    await deliverPiece(t.sql, model, book.id, day(9));
+    const text = String((await sent())[0]!.text);
+    expect(text).toContain(`day ${book.totalPieces} of ${book.totalPieces}`);
+    expect(text).toContain("<b>The story so far</b>\nEverything up to the last chapter, in brief.");
+    expect(text).toContain("<b>The whole book in brief</b>\nThe whole book: the journey from the first page to the ending, complete.");
+    expect(text).toContain("finished the book");
+    expect(JSON.stringify(requests[0]!.messages)).toContain((await db.bookPiece(t.sql, book.id, book.totalPieces))!.body.slice(0, 20)); // the last piece went into it
+    expect(await db.getBook(t.sql, book.id)).toMatchObject({ summaryUpto: book.totalPieces, status: "done" });
   });
 
   it("paused books are left alone", async () => {
