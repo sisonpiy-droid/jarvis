@@ -52,21 +52,34 @@ console.log("2/5 uploading secrets…");
 const secretsDir = join(root, ".secrets");
 mkdirSync(secretsDir, { recursive: true });
 const secretsFile = join(secretsDir, "edge.env");
+// A bad paste must not replace a working key in production: a Gemini key that Google rejects is left out, so the
+// current one stays (and OpenRouter, if configured, covers the gap).
+const geminiRejected = await (async () => {
+  const k = process.env.GEMINI_API_KEY;
+  if (!k) return false;
+  try {
+    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1", { headers: { "x-goog-api-key": k }, signal: AbortSignal.timeout(15_000) });
+    return r.status === 400 || r.status === 401 || r.status === 403;
+  } catch {
+    return false; // can't tell (offline): upload as before
+  }
+})();
+if (geminiRejected) console.log("   GEMINI_API_KEY in .env is rejected by Google — NOT uploading it; production keeps its current Gemini key.");
 try {
   const keys = ["MESA_SESSION_KEY", "CRON_SECRET", "JARVIS_WEB_URL"];
   const optional = [
-    "GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_DRAFT_MODEL", "AUTO_DRAFT", "BRIEF_AI", "GCAL_ICS_URL",
+    "GEMINI_API_KEY", "GEMINI_MODEL", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "GEMINI_DRAFT_MODEL", "AUTO_DRAFT", "BRIEF_AI", "GCAL_ICS_URL",
     // Notifications: push (VAPID, `npm run setup:push`) and email (Resend). The in-app inbox needs neither.
     // Adding events to the owner's Google Calendar (`npm run google:auth`).
     "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN",
     "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT", "RESEND_API_KEY", "NOTIFY_EMAIL_TO", "NOTIFY_EMAIL_FROM",
     // Legacy Telegram channel and bot (rollback until Phase 11).
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_WEBHOOK_SECRET",
-  ].filter((k) => process.env[k]);
+  ].filter((k) => process.env[k] && !(k === "GEMINI_API_KEY" && geminiRejected));
   if (!optional.includes("VAPID_PRIVATE_KEY")) console.log("   (no VAPID keys — push is off until you run `npm run setup:push`)");
   if (!optional.includes("RESEND_API_KEY")) console.log("   (no RESEND_API_KEY — email notifications are off)");
   writeFileSync(secretsFile, [...keys.map((k) => `${k}=${need(k)}`), ...optional.map((k) => `${k}=${process.env[k]}`)].join("\n") + "\n", { mode: 0o600 });
-  if (!optional.includes("GEMINI_API_KEY")) console.log("   (no GEMINI_API_KEY yet — chat will answer quick commands only)");
+  if (!optional.includes("GEMINI_API_KEY") && !geminiRejected) console.log("   (no GEMINI_API_KEY yet — chat will answer quick commands only)");
   run(["secrets", "set", "--project-ref", ref, "--env-file", secretsFile]);
 } finally {
   rmSync(secretsFile, { force: true });

@@ -25,3 +25,5 @@ export * from "./google-calendar";
 export * from "./reading";
 export * from "./book-source";
 export * from "./book-tools";
+export * from "./openrouter";
+export * from "./model-chain";
