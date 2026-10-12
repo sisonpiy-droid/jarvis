@@ -1,6 +1,6 @@
 // Shared by the mesa-sync and jarvis-tick Edge Functions (bundled into each by `npm run edge:build`).
 
-import { GeminiProvider, meterTo } from "@jarvis/ai";
+import { meterTo, modelFromEnv } from "@jarvis/ai";
 import { connect, type Sql } from "@jarvis/db";
 import { SupabaseStorage } from "@jarvis/files";
 import { TelegramChannel } from "@jarvis/notify";
@@ -48,7 +48,7 @@ export function syncDeps(log: Logger): SyncDeps & { sql: Sql } {
     icsUrl: Deno.env.get("GCAL_ICS_URL") ?? null,
     // Job AI calls (brief note, prep, evening plan): 45 s each, one retry — fits every job lease. BRIEF_AI=off (or no key) gives the fixed-template note.
     model:
-      opt("GEMINI_API_KEY") && opt("BRIEF_AI") !== "off" ? new GeminiProvider(env("GEMINI_API_KEY"), opt("GEMINI_MODEL") ?? "gemini-3.6-flash", fetch, 45_000, meterTo(sql)) : null,
+      opt("BRIEF_AI") !== "off" ? modelFromEnv((k) => Deno.env.get(k), { timeoutMs: 45_000, meter: meterTo(sql) }) : null,
     // Auto-draft the backlog unless AUTO_DRAFT=off (and only when an AI key is configured).
     ...(Deno.env.get("GEMINI_API_KEY") && Deno.env.get("JARVIS_WEB_URL") && Deno.env.get("AUTO_DRAFT") !== "off"
       ? {

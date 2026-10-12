@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { GeminiProvider, googleCalendarFromEnv, meterTo, chat, jarvisTools, markdownToChatHtml, resetConversation } from "@jarvis/ai";
+import { googleCalendarFromEnv, meterTo, modelFromEnv, chat, jarvisTools, markdownToChatHtml, resetConversation } from "@jarvis/ai";
 import type { Sql } from "@jarvis/db";
 import { isSignedIn } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -45,8 +45,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) return NextResponse.json({ error: "Chat isn't configured (no AI key)." }, { status: 503 });
+  if (!process.env.GEMINI_API_KEY && !process.env.OPENROUTER_API_KEY) return NextResponse.json({ error: "Chat isn't configured (no AI key)." }, { status: 503 });
   const message = typeof body.message === "string" ? body.message.trim().slice(0, 4000) : "";
   if (!message) return NextResponse.json({ error: "Empty message" }, { status: 400 });
   try {
@@ -54,7 +53,8 @@ export async function POST(req: NextRequest) {
     const res = await chat(
       {
         sql,
-        model: new GeminiProvider(key, process.env.GEMINI_MODEL ?? "gemini-3.6-flash", fetch, 60_000, meterTo(sql)),
+        // Gemini first, OpenRouter behind it: the chat keeps answering if one of them is down or its key is rejected.
+        model: modelFromEnv((k) => process.env[k], { meter: meterTo(sql) })!,
         channel: "web",
         tools: jarvisTools(sql, () => new Date(), { requestDraft, requestRevision: (id, text) => requestRevision(id, text, "chat"), sendFile: (bytes, name, _caption, mime) => saveChatFile(sql, req.nextUrl.origin, bytes, name, mime), readFile: (id) => readStoredFile(sql, id), calendar: googleCalendarFromEnv(process.env) }),
       },

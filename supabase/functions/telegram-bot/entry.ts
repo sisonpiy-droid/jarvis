@@ -1,7 +1,7 @@
 // Supabase Edge Function: Telegram webhook for JARVIS chat.
 // Bundled by `npm run edge:build` into index.js.
 
-import { GeminiProvider, googleCalendarFromEnv, meterTo, handleUpdate, type TelegramUpdate } from "@jarvis/ai";
+import { googleCalendarFromEnv, meterTo, modelFromEnv, handleUpdate, type TelegramUpdate } from "@jarvis/ai";
 import { connect } from "@jarvis/db";
 import { ingestSharedFile, SupabaseStorage } from "@jarvis/files";
 
@@ -26,7 +26,6 @@ function safeEqual(a: string, b: string): boolean {
 async function processUpdate(update: TelegramUpdate) {
   const sql = connect(env("SUPABASE_DB_URL"));
   try {
-    const gemini = Deno.env.get("GEMINI_API_KEY");
     const syncUrl = `${env("SUPABASE_URL")}/functions/v1/mesa-sync?manual`;
     const storage = new SupabaseStorage(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"));
     await handleUpdate(
@@ -34,7 +33,8 @@ async function processUpdate(update: TelegramUpdate) {
         sql,
         token: env("TELEGRAM_BOT_TOKEN"),
         ownerChatId: env("TELEGRAM_CHAT_ID"),
-        model: gemini ? new GeminiProvider(gemini, Deno.env.get("GEMINI_MODEL") ?? "gemini-3.6-flash", fetch, 60_000, meterTo(sql)) : null,
+        // Gemini first, OpenRouter behind it (whichever keys exist).
+        model: modelFromEnv((k) => Deno.env.get(k), { meter: meterTo(sql) }),
         // A file sent to the bot: stored once by content, text extracted, so chat can read or clean it.
         ingestDocument: async (bytes, name, mime) => {
           const ext = name.match(/\.([a-z0-9]{1,8})$/i)?.[1]?.toLowerCase();
