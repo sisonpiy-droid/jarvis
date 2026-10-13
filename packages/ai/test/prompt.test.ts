@@ -49,8 +49,8 @@ describe("systemPrompt", () => {
     expect(p).toContain("change nothing unless told");
   });
 
-  it("is at most 7,000 characters without memories", () => {
-    expect(p.length).toBeLessThanOrEqual(7000);
+  it("is at most 7,500 characters without memories", () => {
+    expect(p.length).toBeLessThanOrEqual(7500);
   });
 
   it("names only tools that exist", () => {

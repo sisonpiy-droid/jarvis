@@ -46,6 +46,7 @@ export function syncDeps(log: Logger): SyncDeps & { sql: Sql } {
     storage: new SupabaseStorage(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY")),
     log,
     icsUrl: Deno.env.get("GCAL_ICS_URL") ?? null,
+    nexusToken: Deno.env.get("NEXUS_TOKEN") ?? null,
     // Job AI calls (brief note, prep, evening plan): 45 s each, one retry — fits every job lease. BRIEF_AI=off (or no key) gives the fixed-template note.
     model:
       opt("BRIEF_AI") !== "off" ? modelFromEnv((k) => Deno.env.get(k), { timeoutMs: 45_000, meter: meterTo(sql) }) : null,

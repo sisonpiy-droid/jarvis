@@ -61,6 +61,10 @@ export function notificationMeta(dedupeKey: string): NotificationMeta {
       return { category: "material", url: "/" };
     case "brief":
       return { category: "brief", url: "/" };
+    case "grade": // grade.released:<assignmentId> — new marks from Nexus
+      return { category: "assignment", url: "/assignments" };
+    case "attendance": // attendance.low:<course>:<attended>/<total>
+      return { category: "class", url: "/classes" };
     case "reading": // reading:<bookId>:<piece> — this morning's piece of the book
       return { category: "brief", url: "/reading" };
     case "week": // week.ahead:<YYYY-MM-DD> — Monday morning: what's due before Friday

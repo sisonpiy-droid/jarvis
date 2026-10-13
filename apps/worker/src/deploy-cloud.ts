@@ -68,7 +68,7 @@ if (geminiRejected) console.log("   GEMINI_API_KEY in .env is rejected by Google
 try {
   const keys = ["MESA_SESSION_KEY", "CRON_SECRET", "JARVIS_WEB_URL"];
   const optional = [
-    "GEMINI_API_KEY", "GEMINI_MODEL", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "GEMINI_DRAFT_MODEL", "AUTO_DRAFT", "BRIEF_AI", "GCAL_ICS_URL",
+    "GEMINI_API_KEY", "GEMINI_MODEL", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "GEMINI_DRAFT_MODEL", "AUTO_DRAFT", "BRIEF_AI", "GCAL_ICS_URL", "NEXUS_TOKEN",
     // Notifications: push (VAPID, `npm run setup:push`) and email (Resend). The in-app inbox needs neither.
     // Adding events to the owner's Google Calendar (`npm run google:auth`).
     "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN",

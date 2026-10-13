@@ -31,7 +31,7 @@ describe("migrations", () => {
 
   it("seed the scheduled jobs", async () => {
     const health = await jobHealth(t.sql);
-    expect(health.map((j) => j.name).sort()).toEqual(["briefs", "calendar", "drafts", "engine", "evening", "habits", "health", "mesa", "notify", "prep", "reading"]);
+    expect(health.map((j) => j.name).sort()).toEqual(["briefs", "calendar", "drafts", "engine", "evening", "habits", "health", "mesa", "nexus", "notify", "prep", "reading"]);
     expect(health.every((j) => j.health === "never_run")).toBe(true);
   });
 });
