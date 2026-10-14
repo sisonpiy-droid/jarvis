@@ -5,6 +5,7 @@ import { cleanedCsv, cleanTable, MAX_ROWS, readTable } from "./clean-data";
 import { markdownToDocx } from "./docx";
 import { emailTools } from "./email-tools";
 import { goalTools } from "./goal-tools";
+import { nexusTools } from "./nexus-tools";
 import { eventId, type GoogleCalendar } from "./google-calendar";
 import { findPassages, searchTerms } from "./material-search";
 import { planningTools } from "./planning-tools";
@@ -498,6 +499,7 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
       },
     },
     ...emailTools(sql),
+    ...nexusTools(sql, now),
     ...workTools(sql, now),
     ...goalTools(sql, now),
     ...planningTools(sql, now),

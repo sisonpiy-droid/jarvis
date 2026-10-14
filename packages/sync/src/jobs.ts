@@ -7,6 +7,7 @@ import { runReading } from "@jarvis/ai";
 import { runClassPrep } from "./class-prep";
 import { runEngine } from "./engine";
 import { runEvening } from "./evening";
+import { runNexus } from "./nexus";
 import { syncCalendar } from "./calendar";
 import { mesaSync, nextToDraft, type SyncDeps, type SyncOptions, type SyncSummary } from "./run";
 import { istHour } from "./time";
@@ -26,11 +27,11 @@ async function storedFile(deps: SyncDeps, sha: string) {
   return { bytes: await deps.storage.download(String(f.storage_path)), name: String(f.original_filename || `${sha.slice(0, 12)}.bin`), mime: String(f.mime_type || "application/octet-stream") };
 }
 
-export const JOB_NAMES = ["mesa", "calendar", "notify", "briefs", "drafts", "habits", "engine", "prep", "evening", "reading", "health"] as const;
+export const JOB_NAMES = ["mesa", "calendar", "notify", "briefs", "drafts", "habits", "engine", "prep", "evening", "reading", "nexus", "health"] as const;
 export type JobName = (typeof JOB_NAMES)[number];
 export const isJobName = (s: string): s is JobName => (JOB_NAMES as readonly string[]).includes(s);
 
-/** pg_cron schedules; must match the cadences seeded in migrations 0012, 0016, 0017, 0020, 0021 and 0026. */
+/** pg_cron schedules; must match the cadences seeded in migrations 0012, 0016, 0017, 0020, 0021, 0026 and 0027. */
 export const JOB_SCHEDULES: Record<JobName, string> = {
   mesa: "*/5 * * * *",
   calendar: "*/5 * * * *", // 5 min: the 30-minute heads-up window needs it
@@ -42,6 +43,7 @@ export const JOB_SCHEDULES: Record<JobName, string> = {
   prep: "*/5 * * * *",
   evening: "*/15 * * * *",
   reading: "*/15 * * * *", // from 08:30 IST; a late run still delivers the same morning
+  nexus: "*/30 * * * *", // grades and attendance change a few times a week
   health: "*/15 * * * *",
 };
 
@@ -57,6 +59,7 @@ const LEASE_MS: Record<JobName, number> = {
   prep: 2 * 60_000,
   evening: 3 * 60_000,
   reading: 3 * 60_000, // up to a few summary calls
+  nexus: 2 * 60_000,
   health: 2 * 60_000,
 };
 
@@ -199,6 +202,12 @@ export const jobBodies: Record<JobName, (deps: SyncDeps, opts: SyncOptions, now:
     const s = await runEvening(deps.sql, now, deps.model ?? null, deps.log);
     if (!s.checkin && !s.learned && s.planned == null) return { status: "idle" };
     return { status: s.errors.length ? "partial" : "success", stats: { ...s }, ...(s.errors.length ? { error: s.errors.join("; ") } : {}) };
+  },
+
+  async nexus(deps, _opts, now) {
+    if (!deps.nexusToken) return { status: "idle", stats: { configured: false } };
+    const s = await runNexus(deps.sql, deps.nexusToken, now, deps.log, deps.fetch);
+    return s.queued ? { status: "success", stats: { ...s } } : { status: "idle", stats: { grades: s.grades, courses: s.courses } };
   },
 
   async reading(deps, _opts, now) {

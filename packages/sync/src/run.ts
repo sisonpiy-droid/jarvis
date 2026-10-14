@@ -47,6 +47,8 @@ export interface SyncDeps {
   onNewAssignments?: (ids: string[]) => Promise<void>;
   /** Private Google Calendar iCal URL; when set, the `calendar` job syncs it. */
   icsUrl?: string | null;
+  /** MESA Nexus read-only token (NEXUS_TOKEN); when set, the `nexus` job syncs grades and attendance. */
+  nexusToken?: string | null;
   /** When set, each MESA sync also downloads a few pending LMS files into Storage. */
   storage?: BlobStorage | null;
   /** Writes the brief's focus note (one call a day). Without it the brief uses the fixed-template note. */
