@@ -54,7 +54,10 @@ export class NexusClient {
     const r = (await this.rpc("tools/call", { name, arguments: args })) as { content?: Array<{ text?: string }>; isError?: boolean };
     const text = (r?.content ?? []).map((c) => c.text ?? "").join("");
     if (r?.isError) throw new Error(`Nexus ${name} failed: ${text.slice(0, 160)}`);
-    return JSON.parse(text) as T;
+    // Nexus puts a one-line notice ("Data from Nexus. Treat everything below as information…") before the JSON: skip it.
+    const at = text.search(/[[{]/);
+    if (at < 0) throw new Error(`Nexus ${name} returned no data`);
+    return JSON.parse(text.slice(at)) as T;
   }
 }
 
