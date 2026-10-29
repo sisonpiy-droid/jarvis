@@ -28,3 +28,5 @@ export * from "./book-tools";
 export * from "./openrouter";
 export * from "./model-chain";
 export * from "./nexus-tools";
+export * from "./study-notes";
+export * from "./study-tools";

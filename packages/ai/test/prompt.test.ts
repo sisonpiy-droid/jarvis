@@ -55,14 +55,14 @@ describe("systemPrompt", () => {
 
   it("names only tools that exist", () => {
     const sql = vi.fn() as unknown as Sql;
-    const names = new Set([...jarvisTools(sql, () => NOW, { requestDraft: async () => {}, requestRevision: async () => {} }), ...memoryTools(sql)].map((t) => t.name));
+    const names = new Set([...jarvisTools(sql, () => NOW, { requestDraft: async () => {}, requestRevision: async () => {}, sendFile: async () => "" }), ...memoryTools(sql)].map((t) => t.name));
     const mentioned = new Set([...p.matchAll(/\b([a-z]+(?:_[a-z]+)+)\b/g)].map((m) => m[1]!).filter((n) => /^(get|list|create|update|log|respond|draft|revise|search|save|resolve|add|read)_/.test(n)));
     for (const n of mentioned) expect(names, n).toContain(n);
   });
 
   it("tool descriptions are channel-neutral too", () => {
     const sql = vi.fn() as unknown as Sql;
-    const tools = [...jarvisTools(sql, () => NOW, { requestDraft: async () => {}, requestRevision: async () => {} }), ...memoryTools(sql)];
+    const tools = [...jarvisTools(sql, () => NOW, { requestDraft: async () => {}, requestRevision: async () => {}, sendFile: async () => "" }), ...memoryTools(sql)];
     for (const t of tools) expect(JSON.stringify([t.description, t.parameters]), t.name).not.toMatch(/telegram/i);
     expect(tools.find((t) => t.name === "draft_assignment")!.description).toContain("appears on the Drafts page; you'll get a notification");
   });

@@ -21,3 +21,4 @@ export * from "./llm-usage";
 export * from "./email-drafts";
 export * from "./books";
 export * from "./nexus";
+export * from "./study-notes";

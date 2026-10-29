@@ -8,6 +8,7 @@ import { goalTools } from "./goal-tools";
 import { nexusTools } from "./nexus-tools";
 import { eventId, type GoogleCalendar } from "./google-calendar";
 import { findPassages, searchTerms } from "./material-search";
+import { revisionNotesTool } from "./study-tools";
 import { planningTools } from "./planning-tools";
 import { workTools } from "./work-tools";
 
@@ -589,6 +590,7 @@ export function jarvisTools(sql: Sql, now: () => Date = () => new Date(), opts: 
   });
   if (opts.sendFile) {
     const sendFile = opts.sendFile;
+    tools.push(revisionNotesTool(sql, now, sendFile));
     tools.push({
       name: "make_document",
       effect: "write-local",
