@@ -186,9 +186,11 @@ export async function mesaSync(deps: SyncDeps, opts: SyncOptions): Promise<SyncS
   return { status, kind, runId, requestCount: client.requestCount, counts: snap.meta.counts, changes: cs.stats, queued: newNotifications, ...(files ? { files } : {}), ...(work ? { work } : {}) };
 }
 
-async function handleFailure(deps: SyncDeps, runId: number, kind: "full" | "light", err: unknown, now: Date): Promise<SyncSummary> {
+export async function handleFailure(deps: SyncDeps, runId: number, kind: "full" | "light", err: unknown, now: Date): Promise<SyncSummary> {
   const { sql, log } = deps;
-  const auth = err instanceof MesaAuthError;
+  // Only a session that is really gone needs a login. A refresh that merely failed (MESA returned a 5xx, a timeout) is
+  // transient: the next run retries, and three failures in a row raise the "sync failing" alert below.
+  const auth = err instanceof MesaAuthError && err.code !== "REFRESH_FAILED";
   const message = err instanceof Error ? err.message : String(err);
   log.error("sync failed", { error: err });
   const failures = await db.recordFailure(sql, PROVIDER, message, auth);
