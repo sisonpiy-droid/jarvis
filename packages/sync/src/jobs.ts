@@ -8,6 +8,7 @@ import { runClassPrep } from "./class-prep";
 import { runEngine } from "./engine";
 import { runEvening } from "./evening";
 import { runNexus } from "./nexus";
+import { runStudyNotes } from "./study-notes";
 import { syncCalendar } from "./calendar";
 import { mesaSync, nextToDraft, type SyncDeps, type SyncOptions, type SyncSummary } from "./run";
 import { istHour } from "./time";
@@ -193,9 +194,12 @@ export const jobBodies: Record<JobName, (deps: SyncDeps, opts: SyncOptions, now:
 
   async prep(deps, _opts, now) {
     const s = await runClassPrep(deps.sql, now, deps.model ?? null, deps.log);
-    const worked = s.queued || s.summarized || s.summaryErrors;
-    if (!worked) return { status: "idle", ...(s.upcoming ? { stats: { ...s } } : {}) };
-    return { status: s.summaryErrors && !s.summarized && !s.queued ? "failed" : "success", stats: { ...s }, ...(s.summaryErrors ? { error: `${s.summaryErrors} pre-read summary call(s) failed` } : {}) };
+    // Study notes (one session per run) and revision packs ride the same job.
+    const n = await runStudyNotes(deps.sql, now, deps.model ?? null, deps.storage ?? null, deps.log);
+    const errors = s.summaryErrors + n.errors;
+    const done = s.queued + s.summarized + n.written + n.packs;
+    if (!done && !errors) return { status: "idle", ...(s.upcoming ? { stats: { ...s } } : {}) };
+    return { status: errors && !done ? "failed" : "success", stats: { ...s, notes: n }, ...(errors ? { error: `${errors} AI call(s) failed (pre-read summaries or study notes)` } : {}) };
   },
 
   async evening(deps, _opts, now) {

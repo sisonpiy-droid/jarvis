@@ -61,6 +61,8 @@ export function notificationMeta(dedupeKey: string): NotificationMeta {
       return { category: "material", url: "/" };
     case "brief":
       return { category: "brief", url: "/" };
+    case "revision": // revision.pack:<assignmentId> — the course's notes before an exam (the file itself is the link)
+      return { category: "class", url: "/classes" };
     case "grade": // grade.released:<assignmentId> — new marks from Nexus
       return { category: "assignment", url: "/assignments" };
     case "attendance": // attendance.low:<course>:<attended>/<total>

@@ -58,6 +58,7 @@ export const HELP = [
   "/status — sync health and sign-in expiry",
   "/costs — what the AI calls cost: today, this week, by task",
   "/read — the next piece of your book now · /postpone — move it a day",
+  "/notes &lt;course&gt; — your revision notes for a course, as a Word file",
   "/sync — check the LMS right now",
   "/draft &lt;assignment&gt; — do the assignment (doc + workbook/slides)",
   "/revise &lt;assignment&gt; | &lt;what to change&gt; — edit it",
@@ -223,7 +224,13 @@ export async function handleUpdate(deps: BotDeps, update: TelegramUpdate): Promi
   if (!fresh.length) return; // Telegram retry of something already handled
 
   let text = (msg.text ?? msg.caption ?? "").trim();
-  const cmd = !msg.document && text.startsWith("/") ? text.split(/[\s@]/)[0]!.toLowerCase() : null;
+  let cmd = !msg.document && text.startsWith("/") ? text.split(/[\s@]/)[0]!.toLowerCase() : null;
+  // /notes <course> is a request for a file, so it goes through chat like asking in words ("notes for Finance").
+  if (cmd === "/notes") {
+    const course = text.slice(text.split(/\s/)[0]!.length).trim();
+    text = course ? `Send me my revision notes for ${course} as a document.` : "Which courses do you have revision notes for? List them, then ask which one I want.";
+    cmd = null;
+  }
   try {
     if (cmd) {
       const out = await commandReply(deps, cmd, text.slice(text.split(/\s/)[0]!.length).trim());
