@@ -1,4 +1,4 @@
-import { isEmptyNotes, markdownToDocx, writeStudyNotes, type ModelProvider } from "@jarvis/ai";
+import { markdownToDocx, writeStudyNotes, type ModelProvider } from "@jarvis/ai";
 import * as db from "@jarvis/db";
 import type { Sql } from "@jarvis/db";
 import type { BlobStorage } from "@jarvis/files";
@@ -62,7 +62,7 @@ export async function runStudyNotes(sql: Sql, now: Date, model: ModelProvider | 
     const key = `revision.pack:${exam.assignmentId}`;
     const [sent] = await sql`select 1 from jarvis.notifications where dedupe_key = ${key}`;
     if (sent || !storage) continue;
-    const notes = (await db.courseNotes(sql, exam.courseId)).filter((n) => !isEmptyNotes(n.notes));
+    const notes = (await db.courseNotes(sql, exam.courseId)).filter(db.hasNoteContent);
     if (!notes.length) continue;
     const stillWriting = (await db.pendingSessionNotes(sql, [], 1000)).some((s) => s.courseId === exam.courseId);
     if (stillWriting && Date.parse(exam.dueAt) - now.getTime() > PACK_NO_WAIT_H * 3_600_000) continue; // a few more runs and the pack is complete

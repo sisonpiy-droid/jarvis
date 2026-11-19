@@ -3,6 +3,7 @@ import type { Sql } from "@jarvis/db";
 import { systemPrompt } from "../src/jarvis";
 import { jarvisTools } from "../src/tools";
 import { memoryTools } from "../src/memory";
+import { classNotesTool } from "../src/study-tools";
 
 // The chat system prompt is the same on every surface: no channel wording, the grounding rule, the
 // memory-versus-database rule and one routing line per chief-of-staff question.
@@ -55,7 +56,7 @@ describe("systemPrompt", () => {
 
   it("names only tools that exist", () => {
     const sql = vi.fn() as unknown as Sql;
-    const names = new Set([...jarvisTools(sql, () => NOW, { requestDraft: async () => {}, requestRevision: async () => {}, sendFile: async () => "" }), ...memoryTools(sql)].map((t) => t.name));
+    const names = new Set([...jarvisTools(sql, () => NOW, { requestDraft: async () => {}, requestRevision: async () => {}, sendFile: async () => "" }), ...memoryTools(sql), classNotesTool(sql, null)].map((t) => t.name)); // tools chat() adds itself
     const mentioned = new Set([...p.matchAll(/\b([a-z]+(?:_[a-z]+)+)\b/g)].map((m) => m[1]!).filter((n) => /^(get|list|create|update|log|respond|draft|revise|search|save|resolve|add|read)_/.test(n)));
     for (const n of mentioned) expect(names, n).toContain(n);
   });

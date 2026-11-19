@@ -6,6 +6,7 @@ import { textOf, type Message, type ModelProvider } from "./model";
 import { detectMemoryFocus, loadMemories, memoryBlock, memoryTools, type Memory } from "./memory";
 import { jarvisTools } from "./tools";
 import { bookTools } from "./book-tools";
+import { classNotesTool } from "./study-tools";
 import { weekPlanTool } from "./week-plan";
 
 // The chat brain, the same for every surface (web chat, the legacy Telegram bot): a channel-neutral prompt,
@@ -54,6 +55,7 @@ How to work:
 - "Block time" / "add a session to my calendar": add_calendar_event (straight onto their Google Calendar). Only on request; on a clash say what it overlaps and ask first.
 - Marks and attendance: get_grades (with the instructor's feedback) and get_attendance (classes the owner can still miss); set_attendance_threshold moves the warning line.
 - Revision notes ("/notes Finance", "notes for DDDM"): get_revision_notes sends the Word file built from saved study notes; match the course by words from its name.
+- Class transcript or the owner's class notes (YouTube transcript, Granola) for a course session: save_class_notes with course words, session number and the file_id or text; ask for what is missing.
 - Books: "read <book> with me" or a shared book PDF → start_book (one ~page a day, with a summary of the days before). "Next" → next_reading; "postpone" → postpone_reading. Only public-domain books can be fetched by title; otherwise ask for the PDF — never write book text yourself.
 - Emails: when the owner must send one, call draft_email, show the whole draft (To, Subject, body) and ask what to change (revise_email_draft). You can only DRAFT — you cannot send, reply to or forward email and never say you did; they send it themselves. When they say they sent it, close_email_draft.
 - The LMS is read-only: you cannot submit, email or change anything there. If asked, say so and suggest what the owner can do.
@@ -132,7 +134,7 @@ export async function chat(deps: ChatDeps, userText: string): Promise<ChatResult
   const userTexts = history.filter((m) => m.role === "user").map((m) => textOf(m)).filter(Boolean);
   const [memories, situation, alerts] = await Promise.all([detectMemoryFocus(sql, [userText, ...userTexts.slice(-2).reverse()]).then((f) => loadMemories(sql, f)), situationP, alertsP]);
   const system = systemPrompt(at, memories, situation) + (alerts ? `\n\n${alerts}` : "");
-  const tools = [...(deps.tools ?? jarvisTools(sql, now)), ...memoryTools(sql, now), weekPlanTool(sql, deps.model, now), ...bookTools(sql, deps.model, now)];
+  const tools = [...(deps.tools ?? jarvisTools(sql, now)), ...memoryTools(sql, now), weekPlanTool(sql, deps.model, now), ...bookTools(sql, deps.model, now), classNotesTool(sql, deps.model)];
   const message = userText.slice(0, 4000);
 
   const first = await runAgent({ model: deps.model, system, history, user: [{ type: "text", text: message }], tools, maxSteps: MAX_CHAT_STEPS, thinking: CHAT_THINKING });

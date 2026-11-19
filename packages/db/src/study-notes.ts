@@ -11,6 +11,11 @@ export interface StudyNotes {
   questions: string[];
 }
 
+/** Notes from what was said in class: the usual lists plus what the professor stressed. */
+export interface LectureNotes extends StudyNotes {
+  emphasis: string[];
+}
+
 export interface SessionSource {
   courseId: string;
   course: string;
@@ -26,7 +31,12 @@ export interface StoredNotes {
   course: string;
   session: number;
   notes: StudyNotes;
+  lecture: LectureNotes | null;
 }
+
+const noneIn = (n: StudyNotes) => !n.concepts.length && !n.formulas.length && !n.terms.length && !n.questions.length;
+/** A session worth including in a pack: it has slide notes or notes from class. */
+export const hasNoteContent = (n: StoredNotes) => !noneIn(n.notes) || (!!n.lecture && (!noneIn(n.lecture) || n.lecture.emphasis.length > 0));
 
 /** Assessments a revision pack is for. */
 export const EXAM_RE = /\b(end[\s-]?term|mid[\s-]?term|final|exam|quiz|viva)\b/i;
@@ -82,7 +92,7 @@ export async function saveSessionNotes(sql: Sql, s: SessionSource, notes: StudyN
 
 /** A course's notes in session order. */
 export async function courseNotes(sql: Sql, courseId: string): Promise<StoredNotes[]> {
-  return (await sql`select course_id, course, session, notes from jarvis.session_notes where course_id = ${courseId} order by session`).map((r) => ({ courseId: String(r.course_id), course: String(r.course), session: Number(r.session), notes: r.notes as StudyNotes }));
+  return (await sql`select course_id, course, session, notes, lecture from jarvis.session_notes where course_id = ${courseId} order by session`).map((r) => ({ courseId: String(r.course_id), course: String(r.course), session: Number(r.session), notes: r.notes as StudyNotes, lecture: (r.lecture as LectureNotes | null) ?? null }));
 }
 
 export interface ExamDue {
@@ -123,10 +133,18 @@ export function revisionPackMarkdown(exam: { course: string; title?: string; due
     if (n.notes.concepts.length) out.push("**Key ideas**", ...n.notes.concepts.map((c) => `- ${c}`));
     if (n.notes.formulas.length) out.push("**Formulas**", ...n.notes.formulas.map((f) => `- ${f}`));
     if (n.notes.terms.length) out.push("**Terms**", ...n.notes.terms.map((t) => `- **${t.term}**: ${t.meaning}`));
+    const l = n.lecture;
+    if (l) {
+      out.push("**In class (what was said)**");
+      if (l.emphasis.length) out.push(...l.emphasis.map((e) => `- ${e}`));
+      if (l.concepts.length) out.push("Ideas from the discussion", ...l.concepts.map((c) => `- ${c}`));
+      if (l.formulas.length) out.push("Formulas used in class", ...l.formulas.map((f) => `- ${f}`));
+      if (l.terms.length) out.push("Terms used in class", ...l.terms.map((t) => `- **${t.term}**: ${t.meaning}`));
+    }
   }
-  const formulas = notes.flatMap((n) => n.notes.formulas.map((f) => `- ${f} (session ${n.session})`));
+  const formulas = notes.flatMap((n) => [...n.notes.formulas, ...(n.lecture?.formulas ?? [])].map((f) => `- ${f} (session ${n.session})`));
   if (formulas.length) out.push("## All formulas in one place", ...formulas);
-  const questions = notes.flatMap((n) => n.notes.questions.map((q) => `- ${q} (session ${n.session})`));
+  const questions = notes.flatMap((n) => [...n.notes.questions, ...(n.lecture?.questions ?? [])].map((q) => `- ${q} (session ${n.session})`));
   if (questions.length) out.push("## Test yourself", ...questions);
   out.push(`_Prepared ${new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium" }).format(now)}._`);
   return out.join("\n\n");
@@ -137,4 +155,22 @@ export async function coursesWithNotes(sql: Sql, words: string[] = []): Promise<
   const rows = await sql`select course_id, course, count(*)::int as sessions from jarvis.session_notes group by 1, 2 order by 2`;
   const w = words.map((x) => x.toLowerCase()).filter(Boolean);
   return rows.filter((r) => w.every((x) => String(r.course).toLowerCase().includes(x))).map((r) => ({ courseId: String(r.course_id), course: String(r.course), sessions: Number(r.sessions) }));
+}
+
+/** Stores notes written from a class transcript. Slide notes of the same session are left alone, and a later rewrite of them keeps these. */
+export async function saveLectureNotes(sql: Sql, c: { courseId: string; course: string }, session: number, lecture: LectureNotes): Promise<void> {
+  const none = { concepts: [], formulas: [], terms: [], questions: [] };
+  await sql`
+    insert into jarvis.session_notes (course_id, session, course, source_key, notes, lecture)
+    values (${c.courseId}, ${session}, ${c.course}, '', ${sql.json(none as never)}, ${sql.json(lecture as never)})
+    on conflict (course_id, session) do update set lecture = excluded.lecture`;
+}
+
+/** The LMS course whose title has all the words (null when none or several match — the caller asks which). */
+export async function findCourse(sql: Sql, words: string[]): Promise<{ courseId: string; course: string } | { candidates: string[] } | null> {
+  const w = words.map((x) => x.toLowerCase()).filter(Boolean);
+  if (!w.length) return null;
+  const rows = (await sql`select source_id, title from jarvis.lms_items where kind = 'course' and removed_at is null`).filter((r) => w.every((x) => String(r.title).toLowerCase().includes(x)));
+  if (rows.length === 1) return { courseId: String(rows[0]!.source_id), course: String(rows[0]!.title) };
+  return rows.length ? { candidates: rows.map((r) => shortCourse(String(r.title))) } : null;
 }
